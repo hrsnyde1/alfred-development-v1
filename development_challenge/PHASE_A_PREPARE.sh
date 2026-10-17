@@ -44,12 +44,12 @@ printf '%s  %s\n' \
   3eb50f78e901175439c9c812db07abb29b5d609593a63084968f933c400be492 \
   /usr/local/lib/alfred-fresh-v1/fresh_v1/upgrade.py | sha256sum -c -
 
-HANDOFF_NAME=alfred-fresh-v1-1.0.1-development-handoff.1
-HANDOFF_ARCHIVE=/root/alfred-fresh-v1-1.0.1-development-handoff.1.tar.gz
-HANDOFF_PARENT=/root/alfred-fresh-v1-development-handoff-1-review
+HANDOFF_NAME=alfred-fresh-v1-1.0.1-development-handoff.2
+HANDOFF_ARCHIVE=/root/alfred-fresh-v1-1.0.1-development-handoff.2.tar.gz
+HANDOFF_PARENT=/root/alfred-fresh-v1-development-handoff-2-review
 HANDOFF_RELEASE="$HANDOFF_PARENT/$HANDOFF_NAME"
-HANDOFF_BACKUP=/root/alfred-fresh-v1-development-handoff-1-backup
-HANDOFF_MANIFEST=4392696cd25bbd38ffbe24972899ccc884041a1a8f19321a118c08154a52bb27
+HANDOFF_BACKUP=/root/alfred-fresh-v1-development-handoff-2-backup
+HANDOFF_MANIFEST=4083213e209cbdbeec41de9837f962d0a9c9d3ac3bc53deec9cd0dc7f1a48bfd
 for HANDOFF_PREP_PATH in "$HANDOFF_ARCHIVE" "$HANDOFF_PARENT" "$HANDOFF_BACKUP"; do
   if test -e "$HANDOFF_PREP_PATH" || test -L "$HANDOFF_PREP_PATH"; then
     printf 'Stop: existing protected preparation path requires review; nothing will be overwritten: %s\n' "$HANDOFF_PREP_PATH" >&2
@@ -57,13 +57,13 @@ for HANDOFF_PREP_PATH in "$HANDOFF_ARCHIVE" "$HANDOFF_PARENT" "$HANDOFF_BACKUP";
   fi
 done
 install -o root -g root -m 0600 \
-  /home/alfred/alfred-development-lab/milestone2/task-a/dist/alfred-fresh-v1-1.0.1-development-handoff.1.tar.gz \
+  /home/alfred/alfred-development-lab/milestone2/task-a/dist/alfred-fresh-v1-1.0.1-development-handoff.2.tar.gz \
   "$HANDOFF_ARCHIVE"
-printf '%s  %s\n' 4cd5448ed005c8d1eb759ec80a8a021c23b97bf4d030bd880124e9f6043175b9 "$HANDOFF_ARCHIVE" | sha256sum -c -
+printf '%s  %s\n' 0f44351cca7ff57d15efc0d535c1a479a8db7ad36ea69506eafb34e7bb264c6f "$HANDOFF_ARCHIVE" | sha256sum -c -
 install -d -o root -g root -m 0700 "$HANDOFF_PARENT"
 tar --extract --gzip --file="$HANDOFF_ARCHIVE" --directory="$HANDOFF_PARENT" \
   --no-same-owner --no-same-permissions
-printf '%s  %s\n' cee25c92548ae07bf3c68a25cb0fea00f2ff54ecbe94421e80368cfa4962629f "$HANDOFF_RELEASE/development_challenge/install_patch.py" | sha256sum -c -
+printf '%s  %s\n' f88b3f8ce01534ff256ff3773ee01be6e6df005b97156a62203215492981133d "$HANDOFF_RELEASE/development_challenge/install_patch.py" | sha256sum -c -
 /usr/bin/python3 -I -B "$HANDOFF_RELEASE/development_challenge/install_patch.py" verify \
   --release "$HANDOFF_RELEASE" --manifest "$HANDOFF_MANIFEST"
 
@@ -108,10 +108,15 @@ import hashlib,json,os,stat,sys
 from pathlib import Path
 release=Path(sys.argv[1])
 installed=json.loads((release/'development_challenge/installed-sha256.json').read_bytes())
+# The one unchanged Photon dependency keeps its established alfred owner; every
+# other pinned file must be root-owned. Digest and mode checks apply to all.
+import pwd
+owners={'/home/alfred/.hermes/hermes-agent/plugins/platforms/photon/sidecar/index.mjs':pwd.getpwnam('alfred').pw_uid}
+assert set(owners)<=set(installed) and 0 not in owners.values()
 for name,expected in installed.items():
     p=Path(name)
     s=p.lstat()
-    assert stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_nlink==1 and not s.st_mode & 0o022,name
+    assert stat.S_ISREG(s.st_mode) and s.st_uid==owners.get(name,0) and s.st_nlink==1 and not s.st_mode & 0o022,name
     for parent in p.parents:
         assert not parent.is_symlink(),str(parent)
     assert hashlib.sha256(p.read_bytes()).hexdigest()==expected,name

@@ -1,5 +1,6 @@
 tests/test_development_challenge_delivery.py
 tests/test_development_handoff_upgrade.py
+tests/test_handoff_dependency_owner_contract.py
 tests/test_development_challenge_failure.py
 tests/test_development_diagnostics_upgrade.py
 tests/test_developer_v1.py

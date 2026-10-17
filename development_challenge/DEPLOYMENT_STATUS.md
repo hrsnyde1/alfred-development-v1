@@ -1,4 +1,58 @@
-# Deployment status — 2026-10-17 00:39 UTC inspection
+# Deployment status
+
+## Correction staged for review — development-handoff.2 (not installed)
+
+The owner-contract mismatch below has a staged correction:
+[OWNER_CONTRACT_CORRECTION.md](OWNER_CONTRACT_CORRECTION.md). The unchanged
+Photon `index.mjs` must be owned by the alfred UID, match its exact digest and
+have no group/other write. Everything else still requires root. Nothing was
+installed and no host ownership was changed. **This supersedes the handoff.1
+pins and the continuation command further down.**
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `dist/alfred-fresh-v1-1.0.1-development-handoff.2.tar.gz` | `0f44351cca7ff57d15efc0d535c1a479a8db7ad36ea69506eafb34e7bb264c6f` |
+| Release `MANIFEST.sha256` (23 payload files) | `4083213e209cbdbeec41de9837f962d0a9c9d3ac3bc53deec9cd0dc7f1a48bfd` |
+| Release `development_challenge/install_patch.py` | `f88b3f8ce01534ff256ff3773ee01be6e6df005b97156a62203215492981133d` |
+| `development_challenge/PHASE_A_PREPARE.sh` | `8ae5244a94cf2e51a5c19492c8ea80bd6ad8178cefc1763c621677164a1cc95c` |
+| `development_challenge/phase_a_continue.py` | `9836add1c2fd42c6f56f15e4fdc0effa27f5a4455d767e44fa5426dccd5c9778` |
+
+`build_handoff_release.py --reproduce` rebuilds the pinned handoff.1 archive
+byte-for-byte (`4cd5448e…75b9`). That is how the handoff.2 build is shown to
+follow the same process. handoff.2 uses new `/root/…-handoff-2-*` paths, so the
+existing handoff.1 review directory is left alone and does not block
+preparation.
+
+After review approval, and after the operator independently confirms messaging
+quiescence, Phase A runs as in [PHASE_A_STATUS.md](PHASE_A_STATUS.md) with the
+new prepare-script pin:
+
+```bash
+set -euo pipefail
+test "$(id -u)" = 0
+umask 077
+test ! -e /root/alfred-fresh-v1-phase-a-prepare.sh || cmp -s \
+  /home/alfred/alfred-development-lab/milestone2/task-a/development_challenge/PHASE_A_PREPARE.sh \
+  /root/alfred-fresh-v1-phase-a-prepare.sh
+install -o root -g root -m 0600 \
+  /home/alfred/alfred-development-lab/milestone2/task-a/development_challenge/PHASE_A_PREPARE.sh \
+  /root/alfred-fresh-v1-phase-a-prepare.sh
+printf '%s  %s\n' \
+  8ae5244a94cf2e51a5c19492c8ea80bd6ad8178cefc1763c621677164a1cc95c \
+  /root/alfred-fresh-v1-phase-a-prepare.sh | sha256sum -c -
+bash /root/alfred-fresh-v1-phase-a-prepare.sh --operator-quiescence-confirmed
+```
+
+The existing `/root/alfred-fresh-v1-phase-a-prepare.sh` holds the handoff.1
+script. Read it before replacing it, and keep a copy as evidence. The `cmp`
+line above deliberately stops when that file differs, so it is never silently
+overwritten. If preparation is interrupted after the review directory exists,
+resume with the continuation, pinned to `9836add1…9778`. Phases B, C and D
+still each need their own approval.
+
+---
+
+# Inspection — 2026-10-17 00:39 UTC (handoff.1)
 
 ## BLOCKED in Phase A
 
