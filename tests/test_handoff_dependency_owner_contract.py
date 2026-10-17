@@ -174,7 +174,9 @@ def transaction_fixture(tmp_path, monkeypatch):
             original(corrected.DEVELOPER + name, sha),
         )
     for name in set(corrected.DESTINATIONS.values()):
-        write(release / name, (LAB / name).read_bytes())
+        # The pinned handoff.2 payload; later releases change the live source tree.
+        payload = LAB / "dist/alfred-fresh-v1-1.0.1-development-handoff.2" / name
+        write(release / name, payload.read_bytes())
     raw = "".join(
         hashlib.sha256((release / n).read_bytes()).hexdigest() + "  " + n + "\n"
         for n in sorted(set(corrected.DESTINATIONS.values()))

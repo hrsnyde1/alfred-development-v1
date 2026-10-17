@@ -41,10 +41,21 @@ def test_grant_store_is_writable_for_the_developer_claim():
     assert covered(Path("/var/lib/alfred-development-grants/execution-ref.json"))
 
 
-def test_repository_git_metadata_is_writable_but_checkout_is_not():
+def test_repository_is_writable_for_git_metadata_and_qa_acls():
+    # git worktree metadata, and setfacl -R on every checkout file before QA.
     repo = Path(json.loads(POLICY.read_text())["repository"])
     assert covered(repo / ".git" / "worktrees")
-    assert not covered(repo / "calculator.py")
+    assert covered(repo / "calculator.py")
+    assert not covered(repo.parent / "projects.proposed.yaml")
+
+
+def test_every_host_share_target_is_writable():
+    # Each setfacl target in fresh_v1/host.py, by the policy key it derives from.
+    policy = json.loads(POLICY.read_text())
+    source = (LAB / "fresh_v1/host.py").read_text()
+    assert 'self.share(Path(job["repository"])' in source
+    for key in ("repository", "worktree_root", "jobs"):
+        assert covered(Path(policy[key]) / "x"), key
 
 
 def test_sandbox_stays_strict():

@@ -6,6 +6,7 @@ Only Intake may verify native owner replies; only Publisher may push/create draf
 
 import argparse
 import fcntl
+import functools
 import hashlib
 import json
 import os
@@ -24,6 +25,35 @@ from .protected import identity, protected_json
 POLICY = Path("/etc/alfred-fresh-v1/policy.json")
 RELEASE = "/usr/local/lib/alfred-fresh-v1"
 USERS = ("alfred", "alfredqa", "alfredreview", "alfredpublish")
+
+
+def predispatch(stage):
+    """A host fault before the worker process starts dispatched nothing, so it is a
+    definite failure. Record it as evidence; the poll then holds this task for good
+    instead of leaving an uncertain attempt that blocks every later request."""
+
+    def wrap(method):
+        @functools.wraps(method)
+        def run(self, job):
+            self.dispatched = False
+            try:
+                return method(self, job)
+            except (subprocess.SubprocessError, OSError) as exc:
+                if self.dispatched:
+                    raise
+                name = stage(self, job) if callable(stage) else stage
+                path = self.jobdir(job) / (name + ".failure.json")
+                if not path.exists():
+                    self.freeze_json(path, failure(name, "host_prepare", exc))
+                raise
+
+        return run
+
+    return wrap
+
+
+def qa_stage(host, job):
+    return "qa-recovery-1" if (host.jobdir(job) / "qa.recovery.json").exists() else "qa"
 
 
 def read_owned(path, uid):
@@ -212,6 +242,7 @@ worker_main(sys.argv[1:])"""
             "--policy",
             str(policy_path),
         ]
+        self.dispatched = True
         try:
             result = command(args, timeout=1200)
         except (
@@ -268,6 +299,13 @@ worker_main(sys.argv[1:])"""
 
         verify(self.policy_path, self.jobdir(job))
 
+    def verify_qa_recovery(self, job):
+        require_root()
+        self.guard()
+        from .qa_recovery import verify
+
+        verify(self.policy_path, self.jobdir(job))
+
     def development_challenge(self, job):
         root = (
             Path(self.p["worktree_root"]) / f"fresh-{job['project']}-{job['task_id']}"
@@ -298,6 +336,7 @@ worker_main(sys.argv[1:])"""
         # and atomically claims this exact grant before model/worktree execution.
         return grant
 
+    @predispatch("developer")
     def developer(self, job):
         plan = json.loads(
             read_owned(
@@ -335,9 +374,14 @@ worker_main(sys.argv[1:])"""
         self.freeze_json(self.jobdir(job) / "execution.json", request, ("alfred",))
         return self.worker(job, "developer", "alfred")
 
+    @predispatch(qa_stage)
     def qa(self, job):
         root = self.jobdir(job)
         base = root / "qa-input"
+        if (root / "qa.recovery.json").exists():
+            # The one authorized T-0005 recovery reuses the complete root-built input
+            # of the undispatched original attempt; qa_recovery pinned its bytes.
+            return self.qa_dispatch(job, root, base)
         self.directory(base)
         source = Path(self.p["developer_state"])
         project, task = job["project"], job["task_id"]
@@ -412,6 +456,10 @@ worker_main(sys.argv[1:])"""
             if c.strip()
         ]
         self.freeze_json(base / "config.json", cfg)
+        return self.qa_dispatch(job, root, base)
+
+    def qa_dispatch(self, job, root, base):
+        project, task = job["project"], job["task_id"]
         self.share(base, ("alfredqa",))
         # Only the activated disposable project and this task's worktrees gain
         # read access. No other project/grant store is exposed to QA.
@@ -450,6 +498,7 @@ worker_main(sys.argv[1:])"""
                 },
             )
 
+    @predispatch("reviewer")
     def reviewer(self, job):
         root = self.jobdir(job)
         base = root / "reviewer-input"
@@ -493,6 +542,7 @@ worker_main(sys.argv[1:])"""
         self.directory(root / "reviewer-output", "alfredreview")
         return self.worker(job, "reviewer", "alfredreview")
 
+    @predispatch("publication-plan")
     def publication_plan(self, job):
         root = self.jobdir(job)
         base = root / "publisher-input"
@@ -617,9 +667,11 @@ worker_main(sys.argv[1:])"""
             self.share(path.parent, ("alfredpublish",))
         return {"path": str(path)}
 
+    @predispatch("publisher")
     def publish(self, job):
         return self.worker(job, "publish", "alfredpublish")
 
+    @predispatch("completion")
     def completion(self, job):
         root = self.jobdir(job)
         base = root / "completion"

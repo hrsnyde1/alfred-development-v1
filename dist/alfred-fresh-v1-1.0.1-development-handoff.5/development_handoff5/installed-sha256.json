@@ -1,0 +1,4 @@
+{
+  "/etc/systemd/system/alfred-development-evidence.service.d/40-fresh-v1.conf": "d657abe22c11bdc0cc9c95de8abf350152aa54f4fe3e30dea17000a326e7aac3",
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/role.py": "99d43e22ace57b1cf4f97972e2e3755a8a2269d66f53f9078220b859407cd109"
+}

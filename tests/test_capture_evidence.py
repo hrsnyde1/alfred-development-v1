@@ -204,3 +204,25 @@ def test_capture_never_writes(host, capsys):
         if p.is_file()
     }
     assert before == after
+
+
+def test_recovered_qa_attempt_satisfies_the_qa_gate(host, capsys):
+    # T-0005 shape: the original QA attempt held undispatched; qa-recovery-1 passed.
+    policy, directory, grants, _ = host
+    complete_run(directory, grants)
+    (directory / "qa.result.json").unlink()
+    write(directory / "qa-recovery-1.attempt.json", {"stage": "qa-recovery-1"})
+    write(directory / "qa-recovery-1.result.json", RESULTS["qa"])
+    result = report(policy, capsys)
+    assert result["overall"] == "PASS"
+    recovered = next(s for s in result["stages"] if s["stage"] == "qa-recovery-1")
+    assert recovered["summary"]["qa_model_present"] is True
+
+
+def test_recovered_qa_attempt_without_result_is_held(host, capsys):
+    policy, directory, grants, _ = host
+    complete_run(directory, grants, upto="developer")
+    write(directory / "qa.attempt.json", {"stage": "qa"})
+    write(directory / "qa-recovery-1.attempt.json", {"stage": "qa-recovery-1"})
+    result = report(policy, capsys, code=2)
+    assert result["gates"]["qa_pass_with_model"]["verdict"] == "HELD"

@@ -1,0 +1,4 @@
+bc5fc4134cdc0b407bc47727ddddd0a900dfcd82a39a06422be03c18862781ee  /opt/alfred-developer-v1/developer_v1/real_worker.py
+e7262bbb772dd1417fdf616e4a6b69c12ad371b5b7408811d5fb0bf259ccffd9  /opt/alfred-developer-v1/developer_v1/release.sha256
+417d6ba68608936954f11a9259ebe48abc2c4351ef2c276c1a61e3cb74a839ed  /opt/alfred-reviewer-v1/independent_reviewer/worker.py
+62481e522cb78e1284d49a49f6a377773e80485a587c941a052427c0afd4efbe  /opt/alfred-reviewer-v1/independent_reviewer/release.sha256
