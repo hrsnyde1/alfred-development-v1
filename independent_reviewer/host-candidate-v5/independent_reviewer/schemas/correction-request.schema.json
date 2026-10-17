@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "alfred.review-correction-request/1",
+  "type": "object",
+  "required": ["schema", "project", "task_id", "developer_commits", "final_revision", "qa_report_sha256", "review_report_sha256", "findings", "next_stage", "new_development_authorization"],
+  "properties": {
+    "schema": {"const": "alfred.review-correction-request/1"}, "project": {"type": "string"},
+    "task_id": {"type": "string"}, "developer_commits": {"type": "array", "items": {"type": "string"}},
+    "final_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "qa_report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "review_report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "findings": {"type": "array"}, "next_stage": {"const": "developer_correction_request"},
+    "new_development_authorization": {"const": false}
+  }, "additionalProperties": false
+}

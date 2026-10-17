@@ -10,6 +10,8 @@ from development_challenge import install_patch as transaction
 from fresh_v1 import upgrade
 
 ROOT = Path(__file__).resolve().parents[1]
+# The pinned handoff.2 payload; later releases change the live source tree.
+HANDOFF2 = ROOT / "dist/alfred-fresh-v1-1.0.1-development-handoff.2"
 
 
 def original(name, expected):
@@ -67,7 +69,7 @@ def fixture(tmp_path):
             original(transaction.DEVELOPER + name, sha),
         )
     for name in set(transaction.DESTINATIONS.values()):
-        write(release / name, (ROOT / name).read_bytes())
+        write(release / name, (HANDOFF2 / name).read_bytes())
     raw = "".join(
         hashlib.sha256((release / n).read_bytes()).hexdigest() + "  " + n + "\n"
         for n in sorted(transaction.DESTINATIONS.values())
@@ -180,7 +182,7 @@ def test_developer_inventory_delta_is_exactly_three_sources():
     old = transaction.inventory(
         (ROOT / "dist/alfred-fresh-v1-1.0.1/developer_v1/release.sha256").read_bytes()
     )
-    new = transaction.inventory((ROOT / "developer_v1/release.sha256").read_bytes())
+    new = transaction.inventory((HANDOFF2 / "developer_v1/release.sha256").read_bytes())
     assert old.keys() == new.keys()
     assert {n for n in old if old[n] != new[n]} == {
         "developer_v1/owner_grants.py",

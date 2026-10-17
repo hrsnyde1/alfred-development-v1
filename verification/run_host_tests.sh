@@ -55,6 +55,16 @@ run handoff4 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_fresh_v1_q
   tests/test_development_handoff4_upgrade.py tests/test_evidence_sandbox_paths.py \
   --junitxml="$OUT/handoff4.xml"
 
+# 3d. handoff.5: role identities observe PAUSE/STOP through the sandbox's read-only
+#     gateway view and still fail closed; the two-file installer.
+run handoff5 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_fresh_v1_role_gateway_view.py \
+  tests/test_development_handoff5_upgrade.py --junitxml="$OUT/handoff5.xml"
+
+# 3e. handoff.6: Developer and Reviewer accept Codex progress notes before exactly one
+#     final contract-shaped message; the four-file installer with inventory checks.
+run handoff6 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_model_message_contract.py \
+  tests/test_development_handoff6_upgrade.py --junitxml="$OUT/handoff6.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"

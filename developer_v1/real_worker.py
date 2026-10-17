@@ -20,6 +20,13 @@ from .router import Denied, ModelChoice, ProviderUnavailable
 
 MAX_SOURCE = 65536
 MAX_OUTPUT = 131072
+
+
+def _json_or_none(text: str):
+    try:
+        return json.loads(text)
+    except ValueError:
+        return None
 PROVIDER = "codex"
 
 
@@ -88,13 +95,22 @@ class CodexReadOnlyBroker:
             raise Denied("model invocation lacks completion evidence")
         answers = [event["item"]["text"] for event in events
                    if event.get("type") == "item.completed" and event.get("item", {}).get("type") == "agent_message"]
-        if len(answers) != 1:
+        if not answers:
             raise Denied("model produced ambiguous response")
-        try:
-            answer = json.loads(answers[0])
-        except ValueError as exc:
-            raise Denied("model response is not JSON") from exc
-        if type(answer) is not dict or set(answer) != {"edits", "summary"} or type(answer["edits"]) is not list:
+        # Codex may send progress notes (e.g. {"status": ...}) before its schema-bound
+        # final message. Exactly one message may carry the edit contract, and it must
+        # be the final one; a second contract-shaped message stays ambiguous.
+        decoded = [_json_or_none(text) for text in answers]
+        contract = [i for i, answer in enumerate(decoded) if type(answer) is dict
+                    and set(answer) == {"edits", "summary"}]
+        if len(contract) > 1:
+            raise Denied("model produced ambiguous response")
+        if not contract or contract[0] != len(answers) - 1:
+            if decoded[-1] is None:
+                raise Denied("model response is not JSON")
+            raise Denied("model edit contract invalid")
+        answer = decoded[-1]
+        if type(answer["edits"]) is not list:
             raise Denied("model edit contract invalid")
         return answer
 
