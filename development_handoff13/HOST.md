@@ -1,4 +1,4 @@
-# handoff.12 host procedure: the CTO's specialists use approved team skills
+# handoff.13 host procedure: the CTO's specialists use approved team skills
 
 ## Why
 Lucius Fox proposes skills to `hrsnyde1/alfred-team-skills`, and the owner approves them
@@ -24,7 +24,7 @@ each task and records them in the plan. The specialist's model receives their te
    permit other files, commands or scope. Codex still runs with `--ignore-user-config` and
    `--ignore-rules`, so no other skill or rule source is involved.
 
-Without `ACTIVE` the plan has no `team_skills` field and behaviour is exactly handoff.11.
+Without `ACTIVE` the plan has no `team_skills` field and behaviour is exactly handoff.12.
 A broken or altered snapshot stops planning (fail closed); removing `ACTIVE` restores the
 old behaviour.
 
@@ -43,10 +43,10 @@ so every plan reader accepts `team_skills` before a plan can contain it. The liv
 `developer_v1/release.sha256` is left as it is (it already predates handoffs 8 to 11).
 
 ## Preconditions
-handoff.11 is installed. All 20 installer pins matched the live host, read only, before
-the build.
+handoff.12 (multi-project) is installed. All 20 installer pins (5 replaced files, 1 absent
+new file, 14 dependencies) matched the live host, read only, before the build.
 
 ## Rollback
-`sudo alfred-dev-ops pause`, then `sudo alfred-dev-ops rollback 12`. It restores the five
+`sudo alfred-dev-ops pause`, then `sudo alfred-dev-ops rollback 13`. It restores the five
 files and removes `team_skills.py`. To turn team skills off without a rollback, use the
 library tool: `cto-rollback --disable` (see the library README).

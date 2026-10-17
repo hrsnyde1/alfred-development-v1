@@ -1,7 +1,7 @@
-"""Deterministic handoff.12 review archive. Staging only; never installs.
+"""Deterministic handoff.13 review archive. Staging only; never installs.
 
 Same immutable, reproducible format as development_challenge/build_handoff_release.py.
-Also writes development_handoff12/release.json, the pins `alfred-dev-ops install 12` reads.
+Also writes development_handoff13/release.json, the pins `alfred-dev-ops install 13` reads.
 """
 
 import argparse
@@ -14,31 +14,31 @@ LAB = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(LAB / "development_challenge"))
 from build_handoff_release import archive, manifest, tree
 
-NAME = "alfred-fresh-v1-1.0.1-development-handoff.12"
+NAME = "alfred-fresh-v1-1.0.1-development-handoff.13"
 PAYLOAD = (
-    "development_handoff12/HOST.md",
-    "development_handoff12/install_patch.py",
-    "development_handoff12/installed-after.sha256",
-    "development_handoff12/installed-sha256.json",
-    "development_handoff12/staging-tests.xml",
+    "development_handoff13/HOST.md",
+    "development_handoff13/install_patch.py",
+    "development_handoff13/installed-after.sha256",
+    "development_handoff13/installed-sha256.json",
+    "development_handoff13/staging-tests.xml",
     "developer_v1/team_skills.py",
     "developer_v1/real_worker.py",
     "developer_v1/pipeline.py",
     "fresh_v1/role.py",
     "v1_cto/plan.schema.json",
-    "tests/test_development_handoff12_upgrade.py",
+    "tests/test_development_handoff13_upgrade.py",
     "tests/test_team_skills.py",
     "verification/role_sandbox_preflight.py",
     "verification/role_sandbox_probe.py",
 )
-INSTALLER = "development_handoff12/install_patch.py"
+INSTALLER = "development_handoff13/install_patch.py"
 
 
 def build():
     dist = LAB / "dist"
     release, target = dist / NAME, dist / (NAME + ".tar.gz")
     checksum = target.with_name(target.name + ".sha256")
-    pins_path = LAB / "development_handoff12" / "release.json"
+    pins_path = LAB / "development_handoff13" / "release.json"
     if any(p.exists() for p in (release, target, checksum, pins_path)):
         raise FileExistsError("immutable release output already exists")
     files = {name: (LAB / name).read_bytes() for name in PAYLOAD}
@@ -57,7 +57,7 @@ def build():
         "manifest_sha256": hashlib.sha256(manifest(files)).hexdigest(),
         "installer": INSTALLER,
         "installer_sha256": hashlib.sha256(files[INSTALLER]).hexdigest(),
-        "installed_after": "development_handoff12/installed-after.sha256",
+        "installed_after": "development_handoff13/installed-after.sha256",
         "preflight": "verification/role_sandbox_preflight.py",
         "restart": [],
     }

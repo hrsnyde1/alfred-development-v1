@@ -1,0 +1,24 @@
+  - id: demo-site
+    company: alfred
+    display_name: Harbor & Pine demo site
+    aliases: [harbor-and-pine, harbor-pine]
+    description: Demo website (static frontend plus api/tip.py) for testing Alfred's development team.
+    status: active
+    repo:
+      github: hrsnyde1/alfred-demo-site
+      default_branch: main
+    local_path: /home/alfred/alfred-development-lab/demo-site/repo
+    stack:
+      language: html-css-js-python
+      version: "3.12"
+      framework: none
+      package_manager: none
+    checks:
+      - /usr/bin/python3 -m unittest discover -v
+    engineering_kit: true
+    context:
+      always: []
+    permissions:
+      hermes_requests: true
+      max_auto_risk: low
+    allowed_task_types: [feature, bugfix, test]

@@ -27,6 +27,14 @@ def write_once(path: Path, obj: dict):
         os.close(fd)
 
 
+def started(directory, name):
+    """Whether this stage was ever attempted (its outcome then decides, never a retry)."""
+    return any(
+        (directory / (name + suffix)).exists()
+        for suffix in (".attempt.json", ".result.json")
+    )
+
+
 def once(directory, name, action):
     finished, attempted = (
         directory / (name + ".result.json"),
@@ -84,6 +92,11 @@ def advance(directory: Path, job: dict, io):
         else:
             context = once(directory, "plan", lambda: io.plan(job))
         job = {**job, **context}
+        if not started(directory, "development-challenge") and io.owner_text_open(
+            "development"
+        ):
+            # One approval text is open at a time; wait without attempting a send.
+            return {"state": "awaiting_development_approval"}
         challenge = once(
             directory, "development-challenge", lambda: io.development_challenge(job)
         )
@@ -111,6 +124,10 @@ def advance(directory: Path, job: dict, io):
             directory, "publication-plan", lambda: io.publication_plan(job)
         )
         job["publication"] = publication
+        if not started(directory, "publication-challenge") and io.owner_text_open(
+            "publication"
+        ):
+            return {"state": "awaiting_publication_approval"}
         challenge = once(
             directory, "publication-challenge", lambda: io.publication_challenge(job)
         )
@@ -119,8 +136,9 @@ def advance(directory: Path, job: dict, io):
         n = 1
         while io.publication_resend_authorized(job, n):
             name = f"publication-challenge-resend-{n}"
-            if not (directory / (name + ".result.json")).exists() and not (
-                io.publication_expired(challenge["challenge"])
+            if not (directory / (name + ".result.json")).exists() and (
+                not io.publication_expired(challenge["challenge"])
+                or (not started(directory, name) and io.owner_text_open("publication"))
             ):
                 break
             challenge = once(directory, name, lambda: io.publication_challenge(job))

@@ -1,0 +1,47 @@
+{
+  "completion_state": "/home/alfred/Alfred/completion-delivery",
+  "developer_state": "/var/lib/alfred-development-state",
+  "enabled": true,
+  "gateway_root": "/home/alfred/Git/alfred",
+  "gateway_state": "/home/alfred/Alfred/gateway",
+  "grant_root": "/var/lib/alfred-development-grants",
+  "intake_socket": "/run/alfred-development-intake/intake.sock",
+  "jobs": "/var/lib/alfred-v1-handoffs",
+  "models": "/var/lib/alfred-development-state/models.json",
+  "projects": {
+    "demo-site": {
+      "allowed_scope": [
+        "api/tip.py",
+        "app.js",
+        "index.html",
+        "styles.css",
+        "tests/test_site.py",
+        "tests/test_tip_api.py"
+      ],
+      "base_branch": "main",
+      "destination": "hrsnyde1/alfred-demo-site",
+      "repository": "/home/alfred/alfred-development-lab/demo-site/repo",
+      "specialists": [
+        "backend",
+        "frontend"
+      ]
+    },
+    "dev-v1-accept": {
+      "allowed_scope": [
+        "calculator.py",
+        "test_calculator.py"
+      ],
+      "base_branch": "main",
+      "destination": "hrsnyde1/alfred-dev-v1-acceptance",
+      "repository": "/home/alfred/alfred-development-lab/milestone2/task-a/live-acceptance/repo",
+      "specialists": [
+        "backend"
+      ]
+    }
+  },
+  "publisher_token": "/var/lib/alfred-draft-pr-private/github-token",
+  "registry": "/home/alfred/Git/alfred/registry/projects.yaml",
+  "schema": "alfred.fresh-v1-policy/2",
+  "total_cost_limit": 6,
+  "worktree_root": "/var/lib/alfred-development-worktrees"
+}

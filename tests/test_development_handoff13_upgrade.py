@@ -1,4 +1,4 @@
-"""handoff.12 team-skills overlay: installation/rollback, only on disposable /tmp fixture roots."""
+"""handoff.13 team-skills overlay: installation/rollback, only on disposable /tmp fixture roots."""
 
 import hashlib
 import json
@@ -8,12 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from development_handoff12 import install_patch as transaction
+from development_handoff13 import install_patch as transaction
 from fresh_v1 import upgrade
 
 ROOT = Path(__file__).resolve().parents[1]
-# main after handoff.11; every BASE and DEPENDENCIES pin is a file of this commit.
-BASE_COMMIT = "5810a4b"
+# main after handoff.12; every BASE and DEPENDENCIES pin is a file of this commit.
+BASE_COMMIT = "8e634d6"
 SOURCES = {
     **transaction.DESTINATIONS,
     transaction.DROP_IN: "fresh_v1/systemd/alfred-development-evidence.conf",
@@ -97,7 +97,7 @@ def test_install_writes_only_the_six_files(fixture):
     assert [e["sha256"] for e in index["files"]] == list(transaction.BASE.values())
 
 
-def test_rollback_restores_the_handoff11_host_and_removes_the_new_file(fixture):
+def test_rollback_restores_the_handoff12_host_and_removes_the_new_file(fixture):
     root, release, pin, backup = fixture
     before = snapshot(root)
     transaction.install(release, pin, root, backup)
@@ -138,15 +138,15 @@ def test_requires_pause(fixture):
 
 
 def test_release_pins_match_the_staged_files():
-    pins = json.loads((ROOT / "development_handoff12/release.json").read_bytes())
+    pins = json.loads((ROOT / "development_handoff13/release.json").read_bytes())
     release = ROOT / "dist" / pins["name"]
-    assert pins["restart"] == [] and pins["installer"] == "development_handoff12/install_patch.py"
+    assert pins["restart"] == [] and pins["installer"] == "development_handoff13/install_patch.py"
     assert upgrade.digest((release / "MANIFEST.sha256").read_bytes()) == pins["manifest_sha256"]
     assert upgrade.verify(release, pins["manifest_sha256"])
     for name, relative in transaction.DESTINATIONS.items():
         assert (release / relative).read_bytes() == (ROOT / relative).read_bytes(), relative
     after = dict(line.split("  ")[::-1] for line in
-                 (ROOT / "development_handoff12/installed-after.sha256").read_text().splitlines())
+                 (ROOT / "development_handoff13/installed-after.sha256").read_text().splitlines())
     assert after == {name: upgrade.digest((ROOT / relative).read_bytes())
                      for name, relative in transaction.DESTINATIONS.items()}
     archive = ROOT / "dist" / (pins["name"] + ".tar.gz")

@@ -86,7 +86,7 @@ inbox. Operator rotation of the bounded audit log must be designed before
 production. The broad legacy Hermes Photon regressions did not complete in
 this sandbox; their media assumptions require explicit compatibility review.
 
-## Team skills for Developer specialists (handoff.12)
+## Team skills for Developer specialists (handoff.13)
 
 Skill text reaches a Developer model prompt, so it is treated as instructions with
 the owner's authority. Threats and controls:

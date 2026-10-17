@@ -1,4 +1,4 @@
-"""handoff.12 overlay: the Central CTO's specialists use the owner-approved team skills.
+"""handoff.13 overlay: the Central CTO's specialists use the owner-approved team skills.
 
 - developer_v1/team_skills.py (new): loads a root-owned snapshot of the merged
   alfred-team-skills library at one pinned commit, re-checks its manifest and the
@@ -39,14 +39,14 @@ DESTINATIONS = {
     DEVELOPER + "pipeline.py": "developer_v1/pipeline.py",
     LIBRARY + "fresh_v1/role.py": "fresh_v1/role.py",
 }
-# Exactly the bytes on the host after handoff.11 (source commit 5810a4b). None: new file.
+# Exactly the bytes on the host after handoff.12 (source commit 8e634d6). None: new file.
 BASE = {
     LIBRARY + "v1_cto/plan.schema.json": "18209b70573b8f068e77fe49f8fc25034bb849d1cc30cb05ce1cb6a38b1367b8",
     GATEWAY_BIN + "plan.schema.json": "18209b70573b8f068e77fe49f8fc25034bb849d1cc30cb05ce1cb6a38b1367b8",
     DEVELOPER + "team_skills.py": None,
     DEVELOPER + "real_worker.py": "bc5fc4134cdc0b407bc47727ddddd0a900dfcd82a39a06422be03c18862781ee",
     DEVELOPER + "pipeline.py": "e22bc7b0c334b243db38b22b87766862cad5b5a10a7aec6c26f60d8c0a97c91a",
-    LIBRARY + "fresh_v1/role.py": "3c2c3968cb858e4469ce11e82dd2bbfd7f61ea43f9dcc783145cbf21f524a688",
+    LIBRARY + "fresh_v1/role.py": "9126c93694cfd51dce41cfdcb8abc6477c19ecc35e055e9c470759ed2e0481ec",
 }
 # The Gateway's own copy stays owned by the Gateway operator; everything else by root.
 GATEWAY_OWNED = {GATEWAY_BIN + "plan.schema.json"}
@@ -60,15 +60,15 @@ DEPENDENCIES = {
     DEVELOPER + "run_task.py": "dd93a1a89975b8a36bc0ce9108cee81dfb18afb131cae05e4dcdc1e95cb69266",
     LIBRARY + "v1_cto/cto.py": "d60da3f6c230ef741c97f9689cd6fe85825b376c6e7029935165adb79b684ec1",
     GATEWAY_BIN + "cto.py": "d60da3f6c230ef741c97f9689cd6fe85825b376c6e7029935165adb79b684ec1",
-    LIBRARY + "fresh_v1/host.py": "d11ed1c414bd260bd94029f7bf038ba0b865ba1e2596ffae49abe7cd6422a732",
-    LIBRARY + "fresh_v1/handoffs.py": "411011e6a6d809601581dae712c6951d082202f04427061367c448ad31c2d0c1",
+    LIBRARY + "fresh_v1/host.py": "1999463059d2617796183dd0c1517bb2be1d8da0f93a45fde7e70a5b34dd9e08",
+    LIBRARY + "fresh_v1/handoffs.py": "1d612babbbfccd422b5ba7198ae01e5943f84f2f0cd6b4400c5425ec18caecbe",
     LIBRARY + "fresh_v1/upgrade.py": "3eb50f78e901175439c9c812db07abb29b5d609593a63084968f933c400be492",
     LIBRARY + "fresh_v1/protected.py": "573cc4c3032671eb8978997c07b5b34da4884a37c594117e608b671d2446233c",
     LIBRARY + "fresh_v1/diagnostics.py": "c5862c14b39b22b7e6faef07aea1d4c32b5ab0df20aab987d4a0fed33b763e0e",
     DROP_IN: "436dde472b64e6f2e64a1a44fe573e59157aeea0e4000c30f3212ba15f7ef484",
     OPS: "0966e652667410920323a5f6b8d47a8ed2c574da4a4006166d3191641babd2ff",
 }
-BACKUP_SCHEMA = "alfred.development-handoff12-backup/1"
+BACKUP_SCHEMA = "alfred.development-handoff13-backup/1"
 
 
 def paused(root):

@@ -408,8 +408,19 @@ class IntakeGate:
             raise IntakeRefused("project_registry_unavailable")
         from alfred.registry.loader import parse_registry, read_registry_data
         registry = parse_registry(read_registry_data(self.registry_path))
+        # The exact project ID, or a registered alias or multi-word ID written
+        # naturally: "demo-site" matches "the demo site" (any case, hyphens or
+        # spaces). A one-word ID such as "alfred" never matches loosely, so
+        # "Alfred, ..." does not name the alfred project.
+        words = " " + " ".join(re.findall(r"[a-z0-9]+", text.casefold())) + " "
+
+        def named(project) -> bool:
+            loose = [*project.aliases, *([project.id] if "-" in project.id else [])]
+            return any(" " + name.replace("-", " ") + " " in words for name in loose)
+
         matches = [p for p in registry.projects
-                   if re.search(r"(?<![a-z0-9-])" + re.escape(p.id) + r"(?![a-z0-9-])", text)]
+                   if re.search(r"(?<![a-z0-9-])" + re.escape(p.id) + r"(?![a-z0-9-])", text)
+                   or named(p)]
         if len(matches) != 1 or matches[0].status != "active" or not matches[0].permissions.hermes_requests:
             raise IntakeRefused("explicit_authorized_project_required")
         return matches[0].id
