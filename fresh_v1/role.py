@@ -13,6 +13,10 @@ from fresh_v1.diagnostics import WorkerFailure, failure, planning_output
 from fresh_v1.handoffs import write_once
 from fresh_v1.protected import identity, protected_json
 
+# Read-only view of the gateway directory inside the Evidence sandbox (drop-in
+# BindReadOnlyPaths), searchable by role identities without traversing /home/alfred.
+GATEWAY_VIEW = Path("/run/alfred-fresh-v1-gateway")
+
 
 def git(repo, *args):
     return (
@@ -188,13 +192,16 @@ def main(argv=None):
         policy, _ = protected_json(args.policy)
     except (OSError, ValueError) as exc:
         raise WorkerFailure(failure(args.stage, "policy_read", exc)) from None
+    # Role identities cannot traverse alfred's home, so the Evidence sandbox mounts
+    # the same gateway directory read-only here. Without the mount, the original
+    # path is used and an unobservable PAUSE/STOP still fails closed.
+    gateway = (
+        GATEWAY_VIEW if GATEWAY_VIEW.is_dir() else Path(policy["gateway_state"])
+    )
     if (
         policy.get("schema") != "alfred.fresh-v1-policy/1"
         or policy.get("enabled") is not True
-        or any(
-            (Path(policy["gateway_state"]) / name).exists()
-            for name in ("PAUSE", "STOP")
-        )
+        or any((gateway / name).exists() for name in ("PAUSE", "STOP"))
     ):
         raise ValueError("fresh V1 dispatch is disabled or paused")
     try:
