@@ -44,6 +44,35 @@ def once(directory, name, action):
     return result
 
 
+def reviewer_blocker(review) -> str | None:
+    """Why a recorded Reviewer result may not advance to draft PR preparation, or None.
+
+    Informational findings never block, but they also never override anything else:
+    the decision, correctness, scope and every acceptance criterion must all pass, and
+    any finding that is not exactly severity "info" (warning, error, critical, unknown,
+    missing or malformed) blocks.
+    """
+    if type(review) is not dict or review.get("decision") != "APPROVED":
+        return "independent Reviewer did not approve"
+    if (review.get("correctness") != "PASS" or review.get("scope") != "PASS"
+            or review.get("next_authorized_stage") != "github_draft_pr_preparation"):
+        return "independent Reviewer correctness or scope did not pass"
+    coverage = review.get("acceptance_coverage")
+    if (type(coverage) is not list or not coverage
+            or any(type(row) is not dict or row.get("result") != "PASS" for row in coverage)):
+        return "independent Reviewer acceptance criteria are not all PASS"
+    findings = review.get("findings")
+    if type(findings) is not list or any(
+        type(finding) is not dict
+        or finding.get("severity") != "info"
+        or any(type(finding.get(k)) is not str or not finding[k]
+               for k in ("requirement", "detail", "evidence"))
+        for finding in findings
+    ):
+        return "independent Reviewer findings require resolution"
+    return None
+
+
 def advance(directory: Path, job: dict, io):
     """Only this literal chain is permitted. No dynamic command/stage selection."""
     try:
@@ -75,10 +104,9 @@ def advance(directory: Path, job: dict, io):
         if qa.get("decision") != "PASS":
             raise Held("independent QA did not pass")
         review = once(directory, "reviewer", lambda: io.reviewer(job))
-        if review.get("decision") != "APPROVED":
-            raise Held("independent Reviewer did not approve")
-        if review.get("findings") != []:
-            raise Held("independent Reviewer findings require resolution")
+        blocker = reviewer_blocker(review)
+        if blocker:
+            raise Held(blocker)
         publication = once(
             directory, "publication-plan", lambda: io.publication_plan(job)
         )

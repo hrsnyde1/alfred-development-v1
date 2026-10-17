@@ -1,0 +1,6 @@
+{
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/handoffs.py": "a515f6e3ff0a4babe44a33c28541657544468f7a233ee8eeb70e4ab48037248c",
+  "/opt/alfred-draft-pr-publisher-v1/worker.py": "051ed86f1fe07260fd663636b665bbef5ddab6c2b8852ecc0a777264ee944ec3",
+  "/opt/alfred-developer-v1/developer_v1/publication_approval.py": "827dbcaf8c3a7a420fb67acc102ff824725f1adf853134fd772100cdb52601e0",
+  "/opt/alfred-developer-v1/developer_v1/schemas/publication-plan.schema.json": "7b034bbac34ad1d0726c0fcb5b559a922a5b0f965a2d7d2b9b9f85616a750a56"
+}

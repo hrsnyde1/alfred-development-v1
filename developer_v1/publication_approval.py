@@ -29,7 +29,32 @@ def _phrase(reference: str, bound: dict | None = None) -> str:
     return f"Approve GitHub Draft PR {bound['project']} {bound['task_id']} {reference}"
 
 
-def _challenge_text(reference: str, bound: dict | None = None, plan_sha: str | None = None) -> str:
+NOTE_LINE = 200
+NOTES_TOTAL = 1500
+
+
+def _notes(plan: dict) -> tuple[tuple[str, str], ...]:
+    """The sealed plan's informational Reviewer findings, as (requirement, detail)."""
+    return tuple((f["requirement"], f["detail"]) for f in plan.get("review_findings", []))
+
+
+def _notes_text(notes: tuple[tuple[str, str], ...]) -> str:
+    if not notes:
+        return ""
+    lines, used = [], 0
+    for i, (requirement, detail) in enumerate(notes):
+        line = " ".join(f"- {requirement}: {detail}".split())
+        line = line if len(line) <= NOTE_LINE else line[:NOTE_LINE - 1] + "…"
+        if used + len(line) > NOTES_TOTAL:
+            lines.append(f"- … {len(notes) - i} more in the sealed publication plan")
+            break
+        lines.append(line)
+        used += len(line)
+    return "Reviewer notes (informational, non-blocking):\n" + "\n".join(lines) + "\n"
+
+
+def _challenge_text(reference: str, bound: dict | None = None, plan_sha: str | None = None,
+                    notes: tuple[tuple[str, str], ...] = ()) -> str:
     bound = BOUND if bound is None else bound
     plan_sha = PLAN_SHA if plan_sha is None else plan_sha
     return ("GitHub Draft PR publication approval\n"
@@ -37,6 +62,7 @@ def _challenge_text(reference: str, bound: dict | None = None, plan_sha: str | N
             f"Repository: {bound['destination']}\nBase: {bound['base_branch']}\n"
             f"Publication branch: {bound['publication_branch']}\n"
             f"Final revision: {bound['final_revision']}\nPublication plan SHA-256: {plan_sha}\n"
+            + _notes_text(notes) +
             "This permits one Draft PR only; it does not permit merge or deployment.\n"
             f"Reply directly to this message within 5 minutes with: {_phrase(reference, bound)}")
 
@@ -54,7 +80,8 @@ def _validate_plan(raw: bytes) -> None:
         raise Denied("publication plan binding mismatch")
 
 
-def _check_receipt(receipt: dict, reference: str, bound: dict | None = None, plan_sha: str | None = None) -> None:
+def _check_receipt(receipt: dict, reference: str, bound: dict | None = None, plan_sha: str | None = None,
+                   notes: tuple[tuple[str, str], ...] = ()) -> None:
     bound = BOUND if bound is None else bound
     plan_sha = PLAN_SHA if plan_sha is None else plan_sha
     if (set(receipt) != {"schema", "reference", "plan_sha256", *BOUND,
@@ -69,7 +96,7 @@ def _check_receipt(receipt: dict, reference: str, bound: dict | None = None, pla
             or not isinstance(receipt.get("message_id"), str) or not receipt["message_id"]
             or type(receipt.get("issued_at")) not in (int, float)
             or receipt.get("expires_at") != receipt["issued_at"] + MAX_AGE
-            or receipt.get("challenge_text_sha256") != _digest(_challenge_text(reference, bound, plan_sha).encode())
+            or receipt.get("challenge_text_sha256") != _digest(_challenge_text(reference, bound, plan_sha, notes).encode())
             or receipt.get("phrase_sha256") != _digest(_phrase(reference, bound).encode())):
         raise Denied("publication challenge receipt invalid")
 
@@ -117,10 +144,10 @@ class PublicationApprovalIssuer:
         self._lock = threading.Lock()
         self.plan_verifier = plan_verifier
 
-    def _context(self, raw: bytes) -> tuple[dict, str]:
+    def _context(self, raw: bytes) -> tuple[dict, str, tuple[tuple[str, str], ...]]:
         if self.plan_verifier is None:
             _validate_plan(raw)
-            return dict(BOUND), PLAN_SHA
+            return dict(BOUND), PLAN_SHA, ()
         if type(raw) is not bytes or len(raw) > 16384:
             raise Denied("invalid publication plan bytes")
         plan = json.loads(raw)
@@ -132,12 +159,12 @@ class PublicationApprovalIssuer:
             validate(plan, json.loads(schema.read_bytes()))
         except ValidationError as exc:
             raise Denied("prepared publication schema invalid") from exc
-        return {key: plan[key] for key in BOUND}, _digest(raw)
+        return {key: plan[key] for key in BOUND}, _digest(raw), _notes(plan)
 
-    def _receipt_context(self, receipt: dict) -> tuple[dict, str]:
+    def _receipt_context(self, receipt: dict) -> tuple[dict, str, tuple[tuple[str, str], ...]]:
         if self.plan_verifier is None or (receipt.get("plan_sha256") == PLAN_SHA and
                 all(receipt.get(k) == v for k, v in BOUND.items())):
-            return dict(BOUND), PLAN_SHA
+            return dict(BOUND), PLAN_SHA, ()
         try:
             raw = self.plan_verifier(receipt.get("project"), receipt.get("task_id"))
         except (OSError, ValueError) as exc:
@@ -147,7 +174,7 @@ class PublicationApprovalIssuer:
     def stage(self, plan_raw: bytes, *, space_id: str, peer_uid: int) -> dict:
         if peer_uid != self.admin_uid or type(space_id) is not str or not space_id:
             raise Denied("publication staging requires administrator and DM")
-        bound, plan_sha = self._context(plan_raw)
+        bound, plan_sha, notes = self._context(plan_raw)
         with self._lock:
             for path in self.root.glob("publication-pending-*.json"):
                 pending = _read(self.root, path.name)
@@ -165,7 +192,7 @@ class PublicationApprovalIssuer:
                 if previous.get("plan_sha256") == plan_sha:
                     raise Denied("publication decision already exists for this plan")
             reference = uuid.uuid4().hex
-            message = _challenge_text(reference, bound, plan_sha)
+            message = _challenge_text(reference, bound, plan_sha, notes)
             message_id = self.send(space_id, message)
             if type(message_id) is not str or not message_id:
                 raise Denied("publication challenge delivery unverified")
@@ -206,8 +233,8 @@ class PublicationApprovalIssuer:
             path, pending = matches[0]
             reference = path.stem.removeprefix("publication-pending-")
             receipt = _read(self.root, f"publication-challenge-{reference}.json")
-            bound, plan_sha = self._receipt_context(receipt)
-            _check_receipt(receipt, reference, bound, plan_sha)
+            bound, plan_sha, notes = self._receipt_context(receipt)
+            _check_receipt(receipt, reference, bound, plan_sha, notes)
             if (pending != {"message_id": target, "space_id": receipt["space_id"],
                             "created_at": receipt["issued_at"],
                             "challenge_sha256": _digest(receipt)}):
@@ -260,8 +287,8 @@ class PublicationApprovalIssuer:
         receipt = _read(self.root, f"publication-challenge-{reference}.json")
         decision = _read(self.root, f"publication-decision-{reference}.json")
         issuance = _read(self.root, f"publication-issuance-{reference}.json")
-        bound, plan_sha = self._receipt_context(receipt)
-        _check_receipt(receipt, reference, bound, plan_sha)
+        bound, plan_sha, notes = self._receipt_context(receipt)
+        _check_receipt(receipt, reference, bound, plan_sha, notes)
         _check_decision(receipt, decision, reference)
         if receipt["owner_id"] != self.owner or decision["peer_uid"] != self.sidecar_uid:
             raise Denied("publication decision identity mismatch")

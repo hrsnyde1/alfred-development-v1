@@ -80,6 +80,10 @@ run handoff8 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_delegated_
 run handoff9 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_intake_clarifying_answer.py \
   tests/test_development_handoff9_upgrade.py --junitxml="$OUT/handoff9.xml"
 
+# handoff.10: informational Reviewer findings advance; everything else still holds.
+run handoff10 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_reviewer_info_findings.py \
+  tests/test_development_handoff10_upgrade.py --junitxml="$OUT/handoff10.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"

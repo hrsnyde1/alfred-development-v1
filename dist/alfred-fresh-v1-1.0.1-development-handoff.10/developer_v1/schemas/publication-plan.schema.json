@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "alfred.draft-pr-plan/1",
+  "type": "object",
+  "required": ["schema", "project", "task_id", "destination", "base_branch", "publication_branch", "baseline_revision", "final_revision", "developer_commits", "changed_file_hashes", "diff_sha256", "qa_report_sha256", "review_report_sha256", "publication_handoff_sha256", "cto_plan_sha256", "development_grant_sha256", "task_spec_sha256", "status"],
+  "properties": {
+    "schema": {"const": "alfred.draft-pr-plan/1"},
+    "project": {"type": "string"}, "task_id": {"type": "string"},
+    "destination": {"type": "string"}, "base_branch": {"type": "string"},
+    "publication_branch": {"type": "string"},
+    "baseline_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "final_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "developer_commits": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{40}$"}},
+    "changed_file_hashes": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+    "diff_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "qa_report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "review_report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "publication_handoff_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "cto_plan_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "development_grant_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "task_spec_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "status": {"const": "READY_FOR_OWNER_AUTHORIZATION"},
+    "review_findings": {"type": "array", "maxItems": 20, "items": {
+      "type": "object", "required": ["severity", "requirement", "detail", "evidence"],
+      "properties": {"severity": {"const": "info"}, "requirement": {"type": "string", "minLength": 1},
+                     "detail": {"type": "string", "minLength": 1}, "evidence": {"type": "string", "minLength": 1}},
+      "additionalProperties": false}}
+  },
+  "additionalProperties": false
+}
