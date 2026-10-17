@@ -25,3 +25,6 @@ __pycache__/
 /photon-live-test/bin/
 /photon-live-test/dist/
 /live-acceptance/repo/.dev/
+
+# Host test and evidence output (may contain host details; never publish)
+/verification/results/
