@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "alfred.qa-input/1",
+  "type": "object",
+  "required": ["schema", "project", "task_id", "repository", "developer_reports", "final_worktree", "final_revision", "changed_file_hashes", "state"],
+  "properties": {
+    "schema": {"const": "alfred.qa-input/1"},
+    "project": {"type": "string"},
+    "task_id": {"type": "string"},
+    "repository": {"type": "string"},
+    "developer_reports": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["schema", "project", "task_id", "status", "files_modified"], "properties": {"schema": {"const": "alfred.developer-report/1"}, "project": {"type": "string"}, "task_id": {"type": "string"}, "status": {"const": "completed"}, "files_modified": {"type": "array"}}}},
+    "final_worktree": {"type": "string"},
+    "final_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "changed_file_hashes": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+    "state": {"const": "ready_for_independent_qa"}
+  },
+  "additionalProperties": false
+}

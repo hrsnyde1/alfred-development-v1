@@ -1,0 +1,9 @@
+# Render only with scripts/render-network.mjs. Never edit placeholders by hand.
+# This is one atomic nft -f batch. "create" refuses an existing table.
+# It affects only the dedicated numeric socket UID and never flushes global rules.
+create table inet alfred_photon_reply_test
+add chain inet alfred_photon_reply_test output { type filter hook output priority -5; policy accept; }
+add chain inet alfred_photon_reply_test test_egress
+add rule inet alfred_photon_reply_test output meta skuid __TEST_UID__ jump test_egress
+__ALLOW_RULES__
+add rule inet alfred_photon_reply_test test_egress counter drop

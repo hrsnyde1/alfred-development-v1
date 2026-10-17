@@ -1,0 +1,22 @@
+{
+  "base": {
+    "ref": "main",
+    "repo": "hrsnyde1/alfred-dev-v1-acceptance"
+  },
+  "draft": false,
+  "head": {
+    "ref": "alfred/dev-v1-accept/T-0002-89ba188f8a2f",
+    "repo": "hrsnyde1/alfred-dev-v1-acceptance",
+    "sha": "89ba188f8a2f801d433a30c9c21363efb3e1043d"
+  },
+  "html_url": "https://github.com/hrsnyde1/alfred-dev-v1-acceptance/pull/1",
+  "inspection_date_utc": "2026-10-16",
+  "merge_commit_sha": "596d91daf3311ad3aa0ee42e7220f699f58daf59",
+  "merged": true,
+  "merged_at": "2026-10-16T08:19:24Z",
+  "merged_by": "hrsnyde1",
+  "number": 1,
+  "recorded_after_inspection_utc": "2026-10-16T08:32:42Z",
+  "source": "GitHub GET /repos/hrsnyde1/alfred-dev-v1-acceptance/pulls/1",
+  "state": "closed"
+}

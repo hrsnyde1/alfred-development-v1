@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "alfred.developer-report/1",
+  "type": "object",
+  "required": ["schema", "project", "task_id", "assignment_id", "specialist", "assigned_scope", "repository", "worktree", "branch", "baseline_revision", "files_modified", "work_completed", "tests", "commits", "known_limitations", "blockers", "status", "model_used", "qa_handoff"],
+  "properties": {
+    "schema": {"const": "alfred.developer-report/1"},
+    "project": {"type": "string"},
+    "task_id": {"type": "string"},
+    "assignment_id": {"type": "string"},
+    "specialist": {"type": "string"},
+    "assigned_scope": {"type": "array", "items": {"type": "string"}},
+    "repository": {"type": "string"},
+    "worktree": {"type": "string"},
+    "branch": {"type": "string"},
+    "baseline_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "files_modified": {"type": "array", "items": {"type": "object", "required": ["path", "sha256"], "properties": {"path": {"type": "string"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "additionalProperties": false}},
+    "work_completed": {"type": "string"},
+    "tests": {"type": "array", "items": {"type": "object", "required": ["name", "outcome", "evidence"], "properties": {"name": {"type": "string"}, "outcome": {"enum": ["passed", "failed", "skipped"]}, "evidence": {"type": "string"}}, "additionalProperties": false}},
+    "commits": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{40}$"}},
+    "known_limitations": {"type": "array", "items": {"type": "string"}},
+    "blockers": {"type": "array", "items": {"type": "string"}},
+    "status": {"enum": ["completed", "blocked", "failed"]},
+    "model_used": {"type": ["object", "null"], "required": ["provider", "model", "reasoning_effort", "fallback_used"], "properties": {"provider": {"type": "string"}, "model": {"type": "string"}, "reasoning_effort": {"type": "string"}, "fallback_used": {"type": "boolean"}}, "additionalProperties": false},
+    "qa_handoff": {"type": "object", "required": ["ready", "baseline_revision", "changed_file_hashes"], "properties": {"ready": {"type": "boolean"}, "baseline_revision": {"type": "string"}, "changed_file_hashes": {"type": "object", "additionalProperties": {"type": "string"}}}, "additionalProperties": false}
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,98 @@
+{
+  "context.json_exists": false,
+  "files": {
+    "/etc/alfred-fresh-v1/policy.json": {
+      "gid": 0,
+      "mode": "0o600",
+      "mtime_ns": 1792181550742820092,
+      "readable": false,
+      "size": 1033,
+      "uid": 0
+    },
+    "/home/alfred/Alfred/gateway/cto-plans/dev-v1-accept-T-0003.json": {
+      "gid": 1000,
+      "mode": "0o600",
+      "mtime_ns": 1792181698987516876,
+      "readable": true,
+      "size": 2931,
+      "uid": 1000
+    },
+    "/var/lib/alfred-v1-handoffs/dev-v1-accept/T-0003/job.json": {
+      "gid": 978,
+      "mode": "0o640",
+      "mtime_ns": 1792181749319795904,
+      "readable": true,
+      "size": 178,
+      "uid": 0
+    },
+    "/var/lib/alfred-v1-handoffs/dev-v1-accept/T-0003/plan.attempt.json": {
+      "gid": 978,
+      "mode": "0o600",
+      "mtime_ns": 1792181749323796085,
+      "readable": false,
+      "size": 60,
+      "uid": 0
+    }
+  },
+  "gh_clean_environment_get": {
+    "auth_failure": false,
+    "network_failure": false,
+    "returncode": 0,
+    "valid_revision": true
+  },
+  "git_read_only_remote_lookup": {
+    "main_ref_returned": true,
+    "returncode": 0
+  },
+  "inspection_utc": "2026-10-16",
+  "installed_sha256": {
+    "/usr/local/lib/alfred-fresh-v1/fresh_v1/handoffs.py": "4a0ee3c9efeb3a2ef23368d4359d5a23162cfdfd0e17ab1fa94d97df9e1bcb9c",
+    "/usr/local/lib/alfred-fresh-v1/fresh_v1/host.py": "86267e1615454475dbca30708d912c7a333c796ea9bfc0d95d1d721000aaa03b",
+    "/usr/local/lib/alfred-fresh-v1/fresh_v1/protected.py": "573cc4c3032671eb8978997c07b5b34da4884a37c594117e608b671d2446233c",
+    "/usr/local/lib/alfred-fresh-v1/fresh_v1/role.py": "0817a393b47a991831d88fde4935f425620971f55468eb0ea7d42cdd2a497a0f"
+  },
+  "original_worker_stderr_retained": false,
+  "plan.failure.json_exists": false,
+  "plan.result.json_exists": false,
+  "preliminary_plan": {
+    "delivery": "pending",
+    "has_baseline": false,
+    "sha256": "a9a900a7259aa8945b64e48d40228a0fee7ab5dcde2294cbd2db7589302a45ee"
+  },
+  "repo_git_metadata": {
+    "alfred_write_access": true,
+    "uid": 1000
+  },
+  "schema": "alfred.fresh-v1-planning-inspection/1",
+  "systemd": {
+    "CapabilityBoundingSet": [
+      "CAP_SETUID",
+      "CAP_SETGID",
+      "CAP_CHOWN",
+      "CAP_DAC_READ_SEARCH"
+    ],
+    "Group": "alfredevidencero",
+    "LimitMEMLOCK": 8388608,
+    "LimitNOFILE": 524288,
+    "NoNewPrivileges": true,
+    "PrivateNetwork": false,
+    "ProtectHome": "read-only",
+    "ProtectSystem": "strict",
+    "RestrictAddressFamilies": [
+      "AF_UNIX",
+      "AF_INET",
+      "AF_INET6",
+      "AF_NETLINK"
+    ],
+    "User": "root"
+  },
+  "task": "dev-v1-accept/T-0003",
+  "worker-policy.json_exists": false,
+  "worker_read_probe": {
+    "errno": 13,
+    "imports_ok": true,
+    "planning_entrypoint_called": false,
+    "policy_read_denied": true,
+    "returncode": 1
+  }
+}

@@ -1,0 +1,29 @@
+version: 1
+companies:
+  - id: alfred
+    display_name: Alfred
+projects:
+  - id: dev-001
+    company: alfred
+    display_name: Development Lab 001
+    aliases: []
+    description: Isolated V1 Gateway filing fixture.
+    status: active
+    repo:
+      github: hrsnyde1/dev-001
+      default_branch: main
+    local_path: FIXTURE_REPO_PATH
+    stack:
+      language: python
+      version: "3.12"
+      framework: none
+      package_manager: uv
+    checks:
+      - uv run pytest
+    engineering_kit: true
+    context:
+      always: [CLAUDE.md]
+    permissions:
+      hermes_requests: true
+      max_auto_risk: medium
+    allowed_task_types: [feature, bugfix, test, docs, refactor]

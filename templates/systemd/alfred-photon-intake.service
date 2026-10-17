@@ -1,0 +1,47 @@
+# CANDIDATE ONLY. Requires pinned runtime, credentials and isolated OS testing.
+[Unit]
+Description=Protected Photon event front and lab ingress candidate
+After=network-online.target
+Wants=network-online.target
+Requires=alfred-photon-intake.socket
+After=alfred-photon-intake.socket
+
+[Service]
+Type=simple
+User=alfredphoton
+Group=alfredphoton
+WorkingDirectory=/opt/alfred-photon-intake
+Environment=HOME=/var/lib/alfred-photon-intake
+LoadCredential=project_id:/etc/alfred-photon-intake/project_id
+LoadCredential=project_secret:/etc/alfred-photon-intake/project_secret
+LoadCredential=sidecar_token:/etc/alfred-photon-intake/sidecar_token
+LoadCredential=ledger_key:/etc/alfred-photon-intake/ledger_key
+LoadCredential=allowed_sender:/etc/alfred-photon-intake/allowed_sender
+ExecStart=/opt/alfred-photon-intake/venv/bin/python -m task_a.service
+StateDirectory=alfred-photon-intake
+StateDirectoryMode=0700
+RuntimeDirectory=alfred-photon-intake
+RuntimeDirectoryMode=0751
+UMask=0027
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+ProtectProc=invisible
+ReadWritePaths=/var/lib/alfred-photon-intake /var/lib/alfred-dev-gateway-lab/Alfred/projects/hermes-requests/inbox /run/alfred-photon-intake
+InaccessiblePaths=-/run/user/1000 -/run/docker.sock -/var/snap/lxd/common/lxd/unix.socket
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

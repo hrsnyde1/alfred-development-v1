@@ -1,0 +1,28 @@
+version: 1
+companies:
+  - id: alfred
+    display_name: Alfred laboratory
+projects:
+  - id: dev-001
+    company: alfred
+    display_name: Development intake laboratory
+    aliases: []
+    description: Disposable local Gateway filing fixture.
+    status: active
+    repo:
+      github: lab-only/dev-001
+      default_branch: main
+    local_path: /srv/alfred-dev-gateway/lab/dev-001
+    stack:
+      language: Python
+      version: "3.12"
+      framework: none
+      package_manager: none
+    checks: ["/usr/bin/true"]
+    engineering_kit: false
+    context:
+      always: []
+    permissions:
+      hermes_requests: true
+      max_auto_risk: low
+    allowed_task_types: [feature, bugfix, test, docs, refactor]

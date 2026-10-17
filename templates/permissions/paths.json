@@ -1,0 +1,25 @@
+{
+  "schema": "task-a-permissions-proposal/1",
+  "status": "candidate-not-applied",
+  "identities": {
+    "alfredhermes": {"uid": 31012, "gid": 31012, "supplementary_gids": [978]},
+    "alfredphoton": {"uid": 31011, "gid": 31011, "supplementary_gids": []},
+    "alfreddevlab": {"uid": 31014, "gid": 31014, "supplementary_gids": []}
+  },
+  "paths": [
+    {"path": "/opt/alfred-hermes/agent", "owner": "root:alfredhermes", "directory_mode": "0750", "file_mode": "0640", "executable_mode": "0750", "hermes": "read-only"},
+    {"path": "/opt/alfred-hermes/plugins/alfred_development_status", "owner": "root:alfredhermes", "directory_mode": "0750", "file_mode": "0640", "hermes": "read-only-bind"},
+    {"path": "/var/lib/alfred-hermes/.hermes", "owner": "alfredhermes:alfredhermes", "directory_mode": "0700", "file_mode": "0600", "hermes": "state-only"},
+    {"path": "/etc/alfred-hermes", "owner": "root:alfredhermes", "directory_mode": "0750", "file_mode": "0640", "hermes": "read-only-config"},
+    {"path": "/opt/alfred-photon-intake", "owner": "root:alfredphoton", "directory_mode": "0750", "file_mode": "0640", "executable_mode": "0750", "broker": "read-only"},
+    {"path": "/var/lib/alfred-photon-intake", "owner": "alfredphoton:alfredphoton", "directory_mode": "0700", "file_mode": "0600", "broker": "private-state"},
+    {"path": "/etc/alfred-photon-intake", "owner": "root:alfredphoton", "directory_mode": "0750", "file_mode": "0640", "broker": "read-only-credentials"},
+    {"path": "/run/alfred-photon-intake/private.sock", "owner": "alfredphoton:alfredphoton", "socket_mode": "0600", "hermes": "deny", "broker": "private-control-and-event-feed"},
+    {"path": "/run/alfred-photon-intake/hermes.sock", "owner": "alfredphoton:alfredhermes", "socket_mode": "0660", "hermes": "restricted-event-reply-submit", "broker": "serve-only"},
+    {"path": "/srv/alfred-dev-gateway/lab/checkout", "owner": "root:alfreddevlab", "directory_mode": "0750", "file_mode": "0640", "gateway": "read-only"},
+    {"path": "/opt/alfred-dev-gateway-lab-venv", "owner": "root:alfreddevlab", "directory_mode": "0750", "file_mode": "0640", "executable_mode": "0750", "gateway": "pinned-interpreter-only"},
+    {"path": "/srv/alfred-dev-gateway/lab/dev-001", "owner": "alfreddevlab:alfreddevlab", "directory_mode": "0700", "file_mode": "0600", "gateway": "disposable-specs-only"},
+    {"path": "/var/lib/alfred-dev-gateway-lab/Alfred/projects/hermes-requests/inbox", "owner": "alfreddevlab:alfreddevlab", "directory_mode": "03700", "acl": "u:alfredphoton:-wx; parent traversal u:alfredphoton:--x", "file_owner": "alfredphoton:alfreddevlab (setgid inheritance)", "file_mode": "0640", "broker": "O_PATH create-and-own-files; no directory read", "gateway": "read new envelopes", "hermes": "deny"},
+    {"path": "/var/lib/alfred-dev-gateway-lab/Alfred/gateway", "owner": "alfreddevlab:alfreddevlab", "directory_mode": "0700", "file_mode": "0600", "broker": "deny", "hermes": "deny"}
+  ]
+}

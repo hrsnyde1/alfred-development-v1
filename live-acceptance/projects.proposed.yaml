@@ -1,0 +1,88 @@
+# Alfred Project Registry (canonical, protected). Contract: registry/schema.json.
+# The Development Gateway files Hermes requests only into projects listed here.
+# Hermes never reads this file; it gets the sanitized registry.public.json instead.
+# Adding a company or project needs Hayden's approval (ADR 0003, phase 5).
+version: 1
+
+companies:
+  - id: alfred
+    display_name: Alfred
+
+projects:
+  - id: alfred
+    company: alfred
+    display_name: Alfred
+    aliases: [alfred-backend, alfred-os]
+    description: Alfred's trusted backend, Development Gateway and engineering pipeline.
+    status: active
+    repo:
+      github: hrsnyde1/alfred
+      default_branch: main
+    local_path: ~/Git/alfred
+    stack:
+      language: python
+      version: "3.12"
+      framework: fastapi
+      package_manager: uv
+    checks:
+      - uv run ruff check .
+      - uv run ruff format --check .
+      - uv run mypy
+      - uv run pytest
+      - uv run python .dev/bin/validate_task.py
+    engineering_kit: true
+    context:
+      always: [CLAUDE.md, docs/adr/]
+    permissions:
+      hermes_requests: true
+      openclaw_requests: true  # legacy (T-0010): read for old records, grants nothing for new work
+      max_auto_risk: medium
+    allowed_task_types: [feature, bugfix, test, docs, refactor]
+  - id: dev-001
+    company: alfred
+    display_name: Development Lab 001
+    aliases: []
+    description: Isolated V1 Gateway filing fixture.
+    status: active
+    repo:
+      github: hrsnyde1/dev-001
+      default_branch: main
+    local_path: /home/alfred/alfred-development-lab/repo
+    stack:
+      language: python
+      version: "3.12"
+      framework: none
+      package_manager: uv
+    checks:
+      - uv run pytest
+    engineering_kit: true
+    context:
+      always: [CLAUDE.md]
+    permissions:
+      hermes_requests: true
+      max_auto_risk: medium
+    allowed_task_types: [feature, bugfix, test, docs, refactor]
+  - id: dev-v1-accept
+    company: alfred
+    display_name: Developer V1 Acceptance Fixture
+    aliases: []
+    description: Local disposable calculator repository for one Backend Developer acceptance task.
+    status: active
+    repo:
+      github: hrsnyde1/alfred-dev-v1-acceptance
+      default_branch: main
+    local_path: /home/alfred/alfred-development-lab/milestone2/task-a/live-acceptance/repo
+    stack:
+      language: python
+      version: "3.12"
+      framework: none
+      package_manager: none
+    checks:
+      - /usr/bin/python3 -m unittest discover -v
+    engineering_kit: true
+    context:
+      always: []
+    permissions:
+      hermes_requests: true
+      max_auto_risk: low
+    allowed_task_types: [feature, bugfix, test]

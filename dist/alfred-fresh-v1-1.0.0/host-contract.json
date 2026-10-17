@@ -1,0 +1,19 @@
+{
+  "installed_sha256": {
+    "/home/alfred/Git/alfred/.dev/bin/cto.py": "f8b5d076cc27f1e3499a50454cdfbd6f8d92c1708d1061ab1ae49dee1027edcf",
+    "/home/alfred/Git/alfred/.dev/bin/plan.schema.json": "6042b0a50e8e78efc0c20f267e1e7b35b646aa17151c212a92f3e1d79fff49b5",
+    "/opt/alfred-developer-v1/developer_v1/owner_grants.py": "3f695b661e7ea57cabed07c16c99056f47a6986fccaceef985dd127d2d044823",
+    "/opt/alfred-developer-v1/developer_v1/pipeline.py": "49bf5c3e600f77c02d348f7d119da69509064c86597cdba18dcc435c0e6b7781",
+    "/opt/alfred-developer-v1/developer_v1/publication_approval.py": "7c1df59b61f930ef2bcbbc15a23ededaab479d883cd18e6156c6d3839b22760b",
+    "/opt/alfred-developer-v1/developer_v1/release.sha256": "32f6b3c717b044a9e516314984dea314c9d448b4d1c59b9bc1407932e269f568",
+    "/opt/alfred-developer-v1/developer_v1/run_task.py": "1af458359644a66285edca318e4d4594017fc8a2dd50dc7246bddec9c08b7f19",
+    "/opt/alfred-developer-v1/developer_v1/trusted_intake_development.py": "01c8911332d2314ccbe8db187a4a6d3ba63ceb9d2475c2ad252af7c9a1855ef0",
+    "/opt/alfred-draft-pr-publisher-v1/worker.py": "051ed86f1fe07260fd663636b665bbef5ddab6c2b8852ecc0a777264ee944ec3",
+    "/opt/alfred-independent-qa-v1/independent_qa/worker.py": "847428390783ba11dca35c600363ceb8514b9944084bda035edfd794e6467184",
+    "/opt/alfred-reviewer-v1/independent_reviewer/worker.py": "8ce51233d5c56c0db3ad1d7d185c33aace41ac21088107a860e8c5959359e39b",
+    "/usr/local/lib/alfred-completion-v1/completion_integration/runtime.py": "2feef45fdde9ed74e66c7c181a7a115fdee29c9b8afb19be5dc65b6f1e4d1bb6",
+    "/usr/local/lib/alfred-v1.1/trusted_intake.py": "01c8911332d2314ccbe8db187a4a6d3ba63ceb9d2475c2ad252af7c9a1855ef0"
+  },
+  "schema": "alfred.fresh-v1-host-contract/1",
+  "version": "1.0.0"
+}

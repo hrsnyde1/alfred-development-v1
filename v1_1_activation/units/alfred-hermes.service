@@ -1,0 +1,46 @@
+[Unit]
+Description=Personal Alfred Hermes under a dedicated V1.1 UID
+After=network-online.target alfred-development-intake.service alfred-photon.service
+Wants=network-online.target alfred-development-intake.service
+Requires=alfred-photon.service
+
+[Service]
+Type=simple
+User=alfredmsg
+Group=alfredmsg
+SupplementaryGroups=alfredevidencero
+WorkingDirectory=/var/lib/alfredmsg/hermes
+Environment=HERMES_HOME=/var/lib/alfredmsg/hermes
+Environment=HERMES_RUNTIME_DIR=/var/lib/alfredmsg/hermes/tools
+Environment=HERMES_SUPERVISED_CHILD=1
+Environment=PHOTON_SIDECAR_EXTERNAL=true
+Environment=PHOTON_SIDECAR_AUTOSTART=false
+Environment=PHOTON_SIDECAR_PORT=8789
+Environment=TERMINAL_ENV=local
+Environment=PHOTON_HERMES_MEDIA_SPOOL=/var/lib/alfredmsg/media
+Environment=ALFRED_DEVELOPMENT_INTAKE_SOCKET=/run/alfred-development-intake/intake.sock
+Environment=PATH=/home/alfred/.hermes/hermes-agent/node_modules/.bin:/home/alfred/.hermes/tools/node-26.7.0-linux-x64/bin:/home/alfred/.hermes/tools/npm-12.0.2-linux-x64/bin:/home/alfred/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+LoadCredential=send-token:/etc/alfred-v1.1/send-token
+ExecStart=/bin/sh -c 'export PHOTON_SIDECAR_TOKEN="$$(cat "$$CREDENTIALS_DIRECTORY/send-token")"; exec /home/alfred/.hermes/hermes-agent/.hermes/bin/hermes gateway run'
+ExecStop=-/home/alfred/.hermes/hermes-agent/.hermes/bin/hermes --run-module gateway.systemd_stop_mark
+ExecStopPost=-/home/alfred/.hermes/hermes-agent/.hermes/bin/hermes --run-module gateway.cgroup_cleanup
+Restart=always
+RestartSec=5
+RestartForceExitStatus=75
+SuccessExitStatus=75
+RestartPreventExitStatus=78
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=70
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/var/lib/alfredmsg
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,44 @@
+--- a/docs/adr/0003-development-gateway.md
++++ b/docs/adr/0003-development-gateway.md
+@@ -113,3 +113,41 @@
+   identity regression test covers every new file.
+ - Known limit, unchanged from ADR 0002: the guard's Bash checks are pattern based;
+   CODEOWNERS, the Reviewer and Hayden's merge remain the backstop.
++
++## Proposed conditional Phase 4 Photon amendment — formal recording pending
++
++This appendix is a **proposed** amendment; conditional design approval and Task A staging work do not activate it.
++
++### Context and current deployment
++
++The former Development Intake v0.3.2 plugin created Hermes Kanban triage records directly and conflicted with the trusted Gateway route. **It has been rolled back.** The operator's recorded transaction state and report status are both `rolled_back`; the installed intake plugin and policy are absent, Hermes is running, and live Photon regression confirmed both Evidence Bridge v0.2.1 tools and no intake tools. The operator's privileged transaction records were supplied as evidence; this staging review did not independently read their root-only contents. The live checkout and configuration were checked separately as described in `V032_ROLLBACK_READINESS.md`.
++
++ADR 0003 defines a requester front that submits `alfred.devreq/1` data to the trusted Gateway. ADR 0009 binds `source: hermes` to the one protected inbox and currently requires the Docker backend. The present host runs Hermes as UID 1000 with a local terminal backend; UID 1000 also has sudo and LXD group membership and access to operator-owned credentials and coding-agent binaries. No current whole-process Linux isolation has been accepted. T-0017 supplies only provenance-unverified read-only Photon status and did not build the envelope writer; T-0008 Phase A remains `in_progress` and grants no real workflow execution.
++
++## Proposed decision requiring human approval
++
++Authorize **design and separately approved implementation** of a Photon Development request adapter for direct authenticated Personal Alfred requests, limited initially to company `alfred` and disposable project `dev-001`. The adapter submits the existing canonical envelope through a protected ingress broker to the Gateway's existing bound Hermes inbox. The Gateway alone validates the untrusted envelope, resolves the project from its protected registry, and files the canonical `proposed` task. Company Masterminds may surface needs to Personal Alfred but cannot supply a direct authenticated user event, call the broker as Personal Alfred, file a task, or initiate execution.
++
++For this Linux laboratory path only, permit a measured alternative to ADR 0009's Docker-only requester rule **after** Task A proves the complete boundary in `LINUX_TOPOLOGY_AND_LAB_FIXTURE.md`. Hermes and every plugin/child run under a dedicated unprivileged identity, separate from UID 1000, the Photon broker, and both real and lab Gateway identities. The local terminal backend is allowed only inside that measured whole-process boundary. The current UID-1000/local configuration remains outside this exception. If any required denial or compatibility test fails, ADR 0009's Docker-only rule remains in force and Task B cannot begin. This is an explicit proposed exception; architecture approval alone does not activate it.
++
++## Controlled Gateway runtime copy and source authority
++
++`/home/alfred/Git/alfred` remains the **authoritative Git source** for Gateway code, schema, registry and ADRs. A root-owned deployment under `/srv/alfred-dev-gateway/` is a **controlled protected runtime copy of a human-approved full commit**, not a second source repository, registry authority, or task system. An operator promotes only the reviewed commit from a trusted repository source, verifies its full commit ID, clean tree and release file hashes, and atomically installs a root-owned immutable runtime tree with a checksum-verified previous version for rollback. No automatic sync, import or symlink from the UID-1000-writable source checkout is permitted. Hermes cannot write either the protected runtime tree or its Gateway state.
++
++Task A uses a **separate laboratory copy** of that approved Gateway code, with a separately hashed `alfred`/`dev-001` fixture registry, a disposable repository and a lab-only Gateway HOME/UID. The fixture never replaces or edits the authoritative `registry/projects.yaml`; the lab UID has no path, credential, approval record or service access to the real Gateway's state. A lab `proposed` task has no route to real approval, execution or publication. A future real Gateway runtime migration or live registry mapping requires its own reviewed diff and human authorization; this amendment does not perform it.
++
++## Preserved trust and authorization contract
++
++1. **Authenticated origin.** The protected Photon broker receives the original adapter-validated direct-user event and pins explicit `sender.id`, conversation ID, event ID and text. Missing or mismatched `sender.id`, address fallback, quoted/forwarded text, bot/internal/delegated turns, Company Mastermind output, CLI/other platforms or profiles, stale events and caller-supplied identity are rejected. The model may recommend a bounded draft through an opaque event handle; it cannot mint an admitted event or supply authority fields.
++2. **Canonical envelope and binding.** Preserve `.dev/schema/envelope.schema.json` and `alfred.gateway.envelope` unchanged: one `alfred.devreq/1` JSON envelope, UUID `request_id`, revision semantics, no workflow fields and unknown-field refusal. Preserve `alfred.gateway.requesters.BINDINGS`: only `~/Alfred/projects/hermes-requests` is bound to `source: hermes`; no arbitrary intake path or source claim is accepted. Only the broker may write the narrow **lab** inbox during this milestone. Hermes has no direct inbox write or protected Gateway read/write route.
++3. **Gateway filing.** The human-controlled Gateway `run-once` validates the envelope as hostile data, uses the protected registry to resolve the untrusted `project_hint`, checks `permissions.hermes_requests`, task type and safe `.dev/tasks`, and alone creates one canonical `source: hermes`, `status: proposed`, `approved_by: null` task with trusted company/project. A Kanban view, if separately approved later, can reference only an already filed Gateway task and cannot be a second task authority.
++4. **Acknowledgment, idempotency and status.** A broker receipt proves inbox submission only. Gateway journal-backed `received`, `filed`, `needs_clarification` and `rejected_invalid` outcomes are distinct; absent, stale or contradictory evidence is unavailable. A retry reuses the original UUID/envelope; a clarification raises its revision only after the Gateway requests it and a new authenticated direct-user answer arrives. The journal and canonical spec are authoritative. T-0017's unsigned requester-writable outbox remains a provisional projection. Task B may propose a separately reviewed Gateway-owned read-only status endpoint; no status path can mutate Gateway state or expose approval data.
++5. **Execution and publication.** Submission, filing, CTO read-only planning and status never mark a task `ready`, issue a grant or start a Developer. The existing human approval, final spec hash, revocation, PAUSE/STOP, run containment and stage preconditions remain mandatory. T-0008 Phase B/C and any real execution need their own authorizations. A separate trusted publisher and human decisions still govern GitHub publication, merge and deployment. No agent approves its own work.
++
++## Gates and decisions reserved to humans
++
++Approve or reject this Linux placement/transport exception and the controlled runtime-copy model. Then separately allocate and approve Task A's high-risk protected-path specification. An independent security reviewer must accept measured whole-process OS denials, authenticated Photon provenance, lab separation, Evidence Bridge compatibility and recovery **in writing** before Task B can even begin. Task B then needs its own allocated spec, approved protected-path diff and human authorization. A later lab deployment, any real registry change, production service migration, live Photon acceptance, execution, publication, merge or deployment requires a separate operator/human decision. No approval is inferred from this ADR, a passing test, or a filed `proposed` task.
++
++## Authoritative references
++
++`/home/alfred/Git/alfred/docs/adr/0002-task-specs-and-openclaw-boundary.md`, `0003-development-gateway.md`, `0004-gateway-approvals.md`, `0008-automated-development-workflow.md`, `0009-hermes-requester.md`; `/home/alfred/Git/alfred/.dev/tasks/T-0008-gateway-automated-dev-workflow.md` and `T-0017-photon-status-reporting.md`. The separate proposed Task A, Task B, topology, rollback evidence and approval checklist in this staging directory provide implementation candidates; none is an accepted authority record.

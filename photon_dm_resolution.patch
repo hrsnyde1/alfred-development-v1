@@ -1,0 +1,16 @@
+--- a/index.mjs
++++ b/index.mjs
+@@ -992,8 +992,6 @@ async function resolveSpace(spaceId) {
+-  // A bare E.164 phone number addresses a DM, so callers can pass just
+-  // "+1..." (e.g. PHOTON_HOME_CHANNEL for cron delivery) instead of an opaque
+-  // inbound space id. Photon also represents DM chat ids as `any;-;+1...`;
+-  // normalize those through the same path. `space.create` accepts the raw
+-  // phone string directly.
++  // A bare E.164 phone number needs space.create. A canonical `any;-;+1...`
++  // DM chat GUID must stay intact for space.get, which rehydrates that chat
++  // after a sidecar restart without requiring a recent inbound message.
+-  if (phoneTarget) {
++  if (phoneTarget && !DM_CHAT_GUID_RE.test(spaceId)) {
+     try {
+       space = await im.space.create(phoneTarget);
+     } catch (e) {

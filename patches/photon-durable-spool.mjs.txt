@@ -1,0 +1,112 @@
+// Protected Task A event spool. This code is inserted into the pinned sidecar.
+const eventSpool = process.env.PHOTON_EVENT_SPOOL;
+if (!eventSpool || !path.isAbsolute(eventSpool)) {
+  throw new Error("absolute protected Photon event spool required");
+}
+const spoolInfo = fs.lstatSync(eventSpool);
+if (!spoolInfo.isDirectory() || spoolInfo.uid !== process.getuid() ||
+    (spoolInfo.mode & 0o077) !== 0) {
+  throw new Error("unsafe protected Photon event spool");
+}
+const spoolFd = fs.openSync(eventSpool, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+const pendingDeliveries = new Map();
+const deliveryWaiters = new Map();
+const liveReadReceipts = new Map();
+const MAX_SPOOLED_EVENTS = 1024;
+const MAX_SPOOLED_BYTES = 64 * 1024;
+
+function spoolPath(id) {
+  if (!/^[0-9a-f]{32}$/.test(id)) throw new Error("invalid Photon delivery id");
+  return path.join(eventSpool, id + ".json");
+}
+
+const startupSpoolNames = fs.readdirSync(eventSpool);
+if (startupSpoolNames.length > MAX_SPOOLED_EVENTS) throw new Error("Photon spool capacity exceeded");
+for (const name of startupSpoolNames) {
+  if (!/^[0-9a-f]{32}\.json$/.test(name)) {
+    if (name.endsWith(".tmp")) continue; // interrupted pre-commit write
+    throw new Error("unexpected Photon spool entry");
+  }
+  const id = name.slice(0, 32);
+  const info = fs.lstatSync(spoolPath(id));
+  if (!info.isFile() || info.nlink !== 1 || info.uid !== process.getuid() || info.size > MAX_SPOOLED_BYTES) {
+    throw new Error("unsafe Photon spool record");
+  }
+  const record = JSON.parse(fs.readFileSync(spoolPath(id), "utf8"));
+  if (record.deliveryId !== id || !record.event || typeof record.event !== "object") {
+    throw new Error("invalid Photon spool record");
+  }
+  pendingDeliveries.set(id, record);
+}
+if (pendingDeliveries.size > MAX_SPOOLED_EVENTS) throw new Error("Photon spool capacity exceeded");
+
+function persistDelivery(event, sdkMessage) {
+  if (pendingDeliveries.size >= MAX_SPOOLED_EVENTS) throw new Error("Photon spool capacity reached");
+  const deliveryId = crypto.randomBytes(16).toString("hex");
+  let record = { deliveryId, event };
+  let payload = Buffer.from(JSON.stringify(record));
+  if (payload.length > MAX_SPOOLED_BYTES) {
+    // An unsupported oversized event still gets a durable decision. The
+    // broker rejects this content-free sentinel and audits the refusal.
+    record = { deliveryId, event: { deliveryError: "oversized" } };
+    payload = Buffer.from(JSON.stringify(record));
+    console.error("photon-sidecar: oversized event queued for explicit rejection");
+  }
+  const target = spoolPath(deliveryId);
+  const temporary = path.join(eventSpool, deliveryId + ".tmp");
+  const fd = fs.openSync(temporary, "wx", 0o600);
+  try {
+    fs.writeFileSync(fd, payload);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(temporary, target);
+  fs.fsyncSync(spoolFd);
+  pendingDeliveries.set(deliveryId, record);
+  if (sdkMessage) liveReadReceipts.set(deliveryId, sdkMessage);
+  return record;
+}
+
+async function deliverUntilAck(record) {
+  const id = record.deliveryId;
+  while (pendingDeliveries.has(id)) {
+    let timer;
+    const acknowledged = new Promise((resolve) => deliveryWaiters.set(id, resolve));
+    await deliver(JSON.stringify({ ...record.event, deliveryId: id }));
+    try {
+      await Promise.race([acknowledged, new Promise((resolve) => {
+        timer = setTimeout(resolve, 5000);
+      })]);
+    } finally {
+      if (timer) clearTimeout(timer);
+      deliveryWaiters.delete(id);
+    }
+  }
+}
+
+async function replayPendingDeliveries() {
+  for (const record of pendingDeliveries.values()) await deliverUntilAck(record);
+}
+
+async function acknowledgeDelivery(body, res) {
+  const id = body?.deliveryId;
+  const decision = body?.decision;
+  if (typeof id !== "string" || !/^[0-9a-f]{32}$/.test(id) ||
+      (decision !== "accepted" && decision !== "rejected" && decision !== "held") || !pendingDeliveries.has(id)) {
+    return badRequest(res, "unknown Photon delivery");
+  }
+  try {
+    fs.unlinkSync(spoolPath(id));
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  fs.fsyncSync(spoolFd);
+  pendingDeliveries.delete(id);
+  const waiter = deliveryWaiters.get(id);
+  if (waiter) waiter();
+  const message = liveReadReceipts.get(id);
+  liveReadReceipts.delete(id);
+  const readReceiptOk = decision === "accepted" && message ? await acknowledgeInboundRead(message) : true;
+  return ok(res, { readReceiptOk });
+}

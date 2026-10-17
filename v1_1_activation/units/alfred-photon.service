@@ -1,0 +1,38 @@
+[Unit]
+Description=Existing Photon sidecar under a dedicated V1.1 UID
+After=network-online.target alfred-development-intake.service
+Wants=network-online.target alfred-development-intake.service
+
+[Service]
+Type=simple
+User=alfredphoton
+Group=alfredphoton
+WorkingDirectory=/home/alfred/.hermes/hermes-agent/plugins/platforms/photon/sidecar
+StateDirectory=alfredphoton
+StateDirectoryMode=0700
+Environment=PHOTON_SIDECAR_BIND=127.0.0.1
+Environment=PHOTON_SIDECAR_PORT=8789
+Environment=PHOTON_DEVELOPMENT_OBSERVER_SOCKET=/run/alfred-development-intake/intake.sock
+Environment=PHOTON_HERMES_MEDIA_SPOOL=/var/lib/alfredmsg/media
+Environment=PHOTON_SIDECAR_WATCH_STDIN=0
+LoadCredential=project-id:/etc/alfred-v1.1/project-id
+LoadCredential=project-secret:/etc/alfred-v1.1/project-secret
+LoadCredential=send-token:/etc/alfred-v1.1/send-token
+LoadCredential=control-token:/etc/alfred-v1.1/control-token
+ExecStart=/bin/sh -c 'export PHOTON_PROJECT_ID="$$(cat "$$CREDENTIALS_DIRECTORY/project-id")" PHOTON_PROJECT_SECRET="$$(cat "$$CREDENTIALS_DIRECTORY/project-secret")" PHOTON_SIDECAR_TOKEN="$$(cat "$$CREDENTIALS_DIRECTORY/send-token")" PHOTON_CONTROL_TOKEN="$$(cat "$$CREDENTIALS_DIRECTORY/control-token")" PHOTON_HERMES_UID="$$(id -u alfredmsg)"; exec /home/alfred/.hermes/tools/node-26.7.0-linux-x64/bin/node /home/alfred/.hermes/hermes-agent/plugins/platforms/photon/sidecar/index.mjs'
+Restart=always
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/var/lib/alfredphoton
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

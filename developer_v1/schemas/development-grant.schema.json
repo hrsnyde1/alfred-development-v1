@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "alfred.development-grant/1",
+  "type": "object",
+  "required": ["schema", "reference", "issuer", "state", "project", "task_id", "spec_sha256", "plan_sha256", "repository", "worktree_root", "scope", "specialists"],
+  "properties": {
+    "schema": {"const": "alfred.development-grant/1"},
+    "reference": {"type": "string", "minLength": 1},
+    "issuer": {"const": "trusted_owner_authority"},
+    "state": {"const": "approved"},
+    "project": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"},
+    "task_id": {"type": "string", "pattern": "^T-[0-9]{4}$"},
+    "spec_sha256": {"$ref": "#/$defs/sha256"},
+    "plan_sha256": {"$ref": "#/$defs/sha256"},
+    "repository": {"type": "string", "pattern": "^/"},
+    "worktree_root": {"type": "string", "pattern": "^/"},
+    "scope": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "specialists": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "source": {"const": "photon_native_owner_reply"},
+    "environment": {"enum": ["host", "staging"]},
+    "owner_event_id": {"type": "string", "minLength": 1},
+    "challenge_message_id": {"type": "string", "minLength": 1},
+    "expires_at": {"type": "number"},
+    "permissions": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+  "additionalProperties": false
+}

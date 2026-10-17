@@ -1,0 +1,23 @@
+{
+  "schema": "task-a-conditional-architecture-review/1",
+  "status": "conditional_design_approval_reported_in_chat",
+  "authority_effect": "staging_planning_and_proposed_code_only",
+  "formal_adr_recording": "pending_human_action",
+  "authoritative_adr_sha256": "dbea1d82a79638e5e3fb2429dc2ba8bb684adb56aa7bf375434ee95e7d61d89a",
+  "staging_amendment_sha256": "26704b183fe8778e22405b47eb170ae6a1fc1992bb2166fd4da0a2764c667002",
+  "hermes_source_commit_observed": "26610b09a5c4aead8d8dfb276ea33decf0d7fa46",
+  "gateway_lab_source_commit_approved": null,
+  "proposed_patch": "adr-0003-conditional-photon-front.proposed.patch",
+  "task_a_canonical_id": null,
+  "task_a_ready": false,
+  "protected_path_approval": false,
+  "production_migration_approval": false,
+  "task_b_start_allowed": false,
+  "required_formal_steps": [
+    "Architecture owner reviews and formally records exact ADR 0003 amendment and conditional ADR 0009 exception.",
+    "Human reviewer selects and pins the full trusted Gateway source commit and dependency manifest for the lab runtime.",
+    "Authorized Gateway task allocator assigns a canonical Task A ID; human reviews protected-path specification and diff.",
+    "Separate operator approval covers identities, files, service migration, credentials and maintenance window.",
+    "Independent reviewer accepts measured Task A security boundary before Task B starts."
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "schema": "alfred.developer-models/1",
+  "providers": {},
+  "specialists": {
+    "frontend": {"primary": null, "fallback": null, "reasoning_effort": "medium", "tools": ["read_scoped", "write_scoped", "run_approved_check"]},
+    "backend": {"primary": null, "fallback": null, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check"]},
+    "full_stack": {"primary": null, "fallback": null, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check"]},
+    "devops": {"primary": null, "fallback": null, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check"]},
+    "data_engineer": {"primary": null, "fallback": null, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check"]},
+    "data_scientist": {"primary": null, "fallback": null, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check"]},
+    "ai_ml": {"primary": null, "fallback": null, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check"]},
+    "integration": {"primary": null, "fallback": null, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check"]},
+    "security": {"primary": null, "fallback": null, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check"]},
+    "mobile": {"primary": null, "fallback": null, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check"]},
+    "performance": {"primary": null, "fallback": null, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check"]}
+  }
+}

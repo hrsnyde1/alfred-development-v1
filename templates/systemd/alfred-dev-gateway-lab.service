@@ -1,0 +1,27 @@
+# CANDIDATE ONLY. Human-started disposable lab run-once; no timer or enablement.
+[Unit]
+Description=Isolated Alfred laboratory Gateway dispatcher candidate
+ConditionPathExists=/var/lib/alfred-dev-gateway-lab/Alfred/projects/hermes-requests/inbox
+
+[Service]
+Type=oneshot
+User=alfreddevlab
+Group=alfreddevlab
+Environment=HOME=/var/lib/alfred-dev-gateway-lab
+WorkingDirectory=/srv/alfred-dev-gateway/lab/current
+ExecStart=/opt/alfred-dev-gateway-lab-venv/bin/python /srv/alfred-dev-gateway/lab/current/.dev/bin/gateway.py run-once
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+ProtectProc=invisible
+IPAddressDeny=any
+RestrictAddressFamilies=AF_UNIX
+ReadWritePaths=/var/lib/alfred-dev-gateway-lab/Alfred /srv/alfred-dev-gateway/lab/dev-001/.dev/tasks
+InaccessiblePaths=-/run/user/1000 -/run/docker.sock -/var/snap/lxd/common/lxd/unix.socket

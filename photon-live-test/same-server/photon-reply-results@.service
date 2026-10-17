@@ -1,0 +1,45 @@
+# Fixed bounded output only, no SDK credentials or host filesystem view.
+[Unit]
+Description=Confined Photon test results (%i)
+AssertPathExists=/srv/photon-reply-test/root/app/MANIFEST.sha256
+
+[Service]
+Type=oneshot
+User=photon-reply-test
+Group=photon-reply-test
+UMask=0077
+RootDirectory=/srv/photon-reply-test/root
+WorkingDirectory=/app
+ExecStart=/app/bin/node /app/scripts/read-results.mjs %i
+BindReadOnlyPaths=/usr:/usr /etc/ssl/certs:/etc/ssl/certs /var/lib/photon-reply-test/%i:/results
+MountAPIVFS=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX
+PrivateNetwork=yes
+IPAddressDeny=any
+SocketBindDeny=any
+KeyringMode=private
+LimitNOFILE=32
+TasksMax=8
+MemoryMax=128M
+TimeoutStartSec=10s
+TimeoutStopSec=5s
+Restart=no
+StandardInput=null
+StandardOutput=journal
+StandardError=journal

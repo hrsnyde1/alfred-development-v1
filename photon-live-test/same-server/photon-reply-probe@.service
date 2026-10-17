@@ -1,0 +1,51 @@
+# Disposable OS acceptance only. Never enable; no Photon credentials or SDK calls.
+[Unit]
+Description=Photon test isolation probe (%i)
+AssertPathExists=/srv/photon-reply-test/root/app/MANIFEST.sha256
+AssertPathExists=/etc/photon-reply-test/probe.env
+
+[Service]
+Type=oneshot
+User=photon-reply-test
+Group=photon-reply-test
+UMask=0077
+RootDirectory=/srv/photon-reply-test/root
+WorkingDirectory=/app
+EnvironmentFile=/etc/photon-reply-test/probe.env
+ExecStartPre=/app/bin/node /app/scripts/integrity.mjs --verify
+ExecStart=/app/bin/node /app/scripts/os-network-probe.mjs ${EXPECT} ${HOST} ${PORT}
+RuntimeDirectory=photon-reply-probe-%i
+RuntimeDirectoryMode=0700
+BindReadOnlyPaths=/usr:/usr /etc/ssl/certs:/etc/ssl/certs
+MountAPIVFS=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+# A separate reviewed probe-only drop-in may allow one disposable listener IP.
+SocketBindDeny=any
+KeyringMode=private
+LimitNOFILE=64
+TasksMax=16
+MemoryMax=128M
+TimeoutStartSec=15s
+TimeoutStopSec=5s
+Restart=no
+StandardInput=null
+StandardOutput=journal
+StandardError=journal

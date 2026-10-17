@@ -1,0 +1,29 @@
+[Unit]
+Description=Protected V1.1 Photon observation and Gateway inbox gate
+After=local-fs.target
+
+[Service]
+Type=simple
+User=alfred
+Group=alfred
+WorkingDirectory=/home/alfred/Git/alfred
+Environment=PYTHONPATH=/home/alfred/Git/alfred/src
+Environment=PYTHONDONTWRITEBYTECODE=1
+RuntimeDirectory=alfred-development-intake
+RuntimeDirectoryMode=0700
+ExecStartPre=/usr/bin/setfacl -m u:alfredmsg:--x,u:alfredphoton:--x,m::--x /run/alfred-development-intake
+ExecStartPre=/usr/bin/setfacl -d -m u:alfredmsg:rw-,u:alfredphoton:rw- /run/alfred-development-intake
+ExecStart=/home/alfred/Git/alfred/.venv/bin/python -B /usr/local/lib/alfred-v1.1/trusted_intake.py --config /home/alfred/Alfred/gateway/v1-1-intake.json
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/run/alfred-development-intake /home/alfred/Alfred/projects/hermes-requests
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

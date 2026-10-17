@@ -1,0 +1,9 @@
+{
+  "name": "alfred-photon-reply-target-isolated-test",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "dry-run": "node src/runtime.mjs --dry-run"
+  }
+}

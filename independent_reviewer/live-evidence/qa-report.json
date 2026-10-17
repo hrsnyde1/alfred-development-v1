@@ -1,0 +1,89 @@
+{
+  "acceptance_criteria": [
+    {
+      "criterion": "add(7, 3) returns 10.",
+      "evidence": "calculator_examples",
+      "result": "PASS"
+    },
+    {
+      "criterion": "subtract(7, 3) returns 4.",
+      "evidence": "calculator_examples",
+      "result": "PASS"
+    },
+    {
+      "criterion": "The existing unittest discovery command passes.",
+      "evidence": "python_unittest",
+      "result": "PASS"
+    }
+  ],
+  "baseline_revision": "9000574c4c8807e84c4350e2fd342deeba341d7d",
+  "changed_file_hashes": {
+    "calculator.py": "8b7592a111b9a05664ec660fb67d926fa3810ff816dd5fb50ea37eae72284c5b"
+  },
+  "decision": "PASS",
+  "developer_commits": [
+    "867fde90acf3f0055af79bda53a0fccb55f6bf34"
+  ],
+  "evidence": {
+    "canonical_task_sha256": "a5c11c720f0371c57322524e866338349beb1933b82173a8ba3bf0dd044ba9df",
+    "cto_plan_sha256": "01ee8d677754b7a257cb009df93ad9dbb42c6f72cff09aa5724c4c17e3de96b3",
+    "developer_reports": {
+      "backend-subtract": {
+        "path": "/var/lib/alfred-independent-qa-evidence/dev-v1-accept/T-0002/report-backend-subtract.json",
+        "sha256": "81f924168f3452b3507650ce4f58ace315dbff7fb33de14d42b97550e2cdeb6d"
+      }
+    },
+    "development_grant_reference": "445759a699d9423bbb5a8f1dd589689a",
+    "development_grant_sha256": "da2aaa1e7ae05eae456d11b2a8dce1992c74db12a617e23cb4c6c8e69a093355",
+    "final_worktree": "/var/lib/alfred-development-worktrees/dev-v1-accept-T-0002-final",
+    "qa_input_path": "/var/lib/alfred-independent-qa-evidence/dev-v1-accept/T-0002/qa-input.json",
+    "qa_input_sha256": "62b2657cb31747b368c0c066107a4afa42ea21350e82563a9b67ed16964a0171"
+  },
+  "files_inspected": [
+    ".dev/task-id-reservations.txt",
+    ".dev/tasks/.gitkeep",
+    "calculator.py",
+    "test_calculator.py"
+  ],
+  "final_revision": "89ba188f8a2f801d433a30c9c21363efb3e1043d",
+  "findings": [
+    {
+      "detail": "Codex CLI unavailable",
+      "requirement": "model_analysis",
+      "severity": "info"
+    }
+  ],
+  "next_authorized_action": "independent_reviewer",
+  "project": "dev-v1-accept",
+  "qa_model": null,
+  "schema": "alfred.qa-report/1",
+  "task_id": "T-0002",
+  "tests": [
+    {
+      "command": [
+        "/usr/bin/python3",
+        "-B",
+        "-c",
+        "import calculator; assert calculator.add(7, 3) == 10; assert calculator.subtract(7, 3) == 4; print('add=10 subtract=4')"
+      ],
+      "exit_code": 0,
+      "id": "calculator_examples",
+      "output": "add=10 subtract=4\n",
+      "result": "PASS"
+    },
+    {
+      "command": [
+        "/usr/bin/python3",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-v"
+      ],
+      "exit_code": 0,
+      "id": "python_unittest",
+      "output": "test_add (test_calculator.CalculatorTests.test_add) ... ok\ntest_subtract (test_calculator.CalculatorTests.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n",
+      "result": "PASS"
+    }
+  ]
+}

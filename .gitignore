@@ -1,0 +1,27 @@
+# Local credentials and runtime state
+.env
+.env.*
+!.env.example
+.aws/
+.codex/
+.agents/
+credentials.json
+secrets/
+*.pem
+*.key
+
+# Dependencies and generated caches
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.regression-*/
+.uv-cache*/
+
+# Local bundled runtimes and private task evidence
+/photon-live-test/bin/
+/photon-live-test/dist/
+/live-acceptance/repo/.dev/

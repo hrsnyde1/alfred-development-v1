@@ -1,0 +1,16 @@
+{
+  "/home/alfred/.hermes/hermes-agent/plugins/platforms/photon/sidecar/development-observe.mjs": "bea7beb14530739c523b67780ce0d40537665b441e13bea56cb17ca5c29ed009",
+  "/home/alfred/.hermes/hermes-agent/plugins/platforms/photon/sidecar/index.mjs": "ef019d1d50e4ca680aede49276181f8eff8d396d9b7c22a73bb5da2b2d7bb8e4",
+  "/opt/alfred-developer-v1/developer_v1/owner_grants.py": "d8e88bf8f42a0eb19e3f3d5a80d1985daf33ced47c318cd1826210799a40e463",
+  "/opt/alfred-developer-v1/developer_v1/release.sha256": "c23cb89acc0ddc17fe382c4ea3e985c8404ebbf2dace1d20bbad19da81fa9edd",
+  "/opt/alfred-developer-v1/developer_v1/stage_approval.py": "98990b9e8c9ed142d9bc6d330f8521b583758f7bc523facd12ab3f99097bcdf8",
+  "/opt/alfred-developer-v1/developer_v1/trusted_intake_development.py": "d3e1677cb8d7ee17ab801448e85db48fee12d88bbf21a3561e9e755eef742168",
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/diagnostics.py": "c5862c14b39b22b7e6faef07aea1d4c32b5ab0df20aab987d4a0fed33b763e0e",
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/handoffs.py": "09568b8de620b61c28dbf4c4a3be824c7e4eecd3800aaa47d6858a13ad066ebb",
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/host.py": "9cb19786ec25b87de5012704fb739b7c8bce9bacdad38469c41b774909ce2b73",
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/protected.py": "573cc4c3032671eb8978997c07b5b34da4884a37c594117e608b671d2446233c",
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/recovery.py": "d6e3f3627f5f6c82223fe16dab7ef43d619cda4d98c4edf99467a76c0df688c4",
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/role.py": "99d43e22ace57b1cf4f97972e2e3755a8a2269d66f53f9078220b859407cd109",
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/upgrade.py": "3eb50f78e901175439c9c812db07abb29b5d609593a63084968f933c400be492",
+  "/usr/local/lib/alfred-v1.1/trusted_intake.py": "d3e1677cb8d7ee17ab801448e85db48fee12d88bbf21a3561e9e755eef742168"
+}

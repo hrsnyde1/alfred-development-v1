@@ -1,0 +1,340 @@
+"""One append-only planning recovery for the confirmed T-0003 policy-read failure.
+
+inspect is read-only; authorize writes only a preserved plan and an operator
+decision. Only the existing automatic handoff can execute the new attempt.
+"""
+
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+import pwd
+import re
+import stat
+import time
+from pathlib import Path
+
+from .handoffs import Held, write_once
+from .protected import protected_json
+
+TARGET = ("dev-v1-accept", "T-0003")
+DECISION = "plan.recovery.json"
+COPY = "plan-recovery-1.preliminary.json"
+ATTEMPT = "plan-recovery-1.attempt.json"
+RESULT = "plan-recovery-1.result.json"
+SCHEMA = "alfred.fresh-v1-plan-recovery/1"
+LIBRARY = Path("/usr/local/lib/alfred-fresh-v1/fresh_v1")
+RUNTIME = (
+    "host.py",
+    "role.py",
+    "handoffs.py",
+    "protected.py",
+    "diagnostics.py",
+    "recovery.py",
+)
+
+
+def canonical(value):
+    return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode()
+
+
+def digest(raw):
+    return hashlib.sha256(raw).hexdigest()
+
+
+class Evidence:
+    def __init__(
+        self,
+        policy_path,
+        directory,
+        *,
+        uid=0,
+        trusted_root=Path("/"),
+        alfred_uid=None,
+        library=LIBRARY,
+    ):
+        self.policy_path, self.directory = policy_path, directory
+        self.uid, self.trusted_root, self.library = uid, trusted_root, library
+        self.alfred_uid = (
+            pwd.getpwnam("alfred").pw_uid if alfred_uid is None else alfred_uid
+        )
+
+    def protected(self, path):
+        return protected_json(
+            path, trusted_uid=self.uid, trusted_root=self.trusted_root
+        )
+
+    def owned(self, path, uid):
+        # Reuse the existing descriptor-pinned, nofollow, bounded evidence reader.
+        from .host import read_owned
+
+        return read_owned(path, uid)
+
+    def core(self):
+        p, policy_sha = self.protected(self.policy_path)
+        job, job_sha = self.protected(self.directory / "job.json")
+        original, attempt_sha = self.protected(self.directory / "plan.attempt.json")
+        if (
+            (job.get("project"), job.get("task_id")) != TARGET
+            or p.get("project") != TARGET[0]
+            or p.get("schema") != "alfred.fresh-v1-policy/1"
+            or p.get("enabled") is not True
+            or self.directory != Path(p["jobs"]) / TARGET[0] / TARGET[1]
+            or original != {"stage": "plan", "status": "uncertain_until_result"}
+            or (self.directory / "plan.result.json").exists()
+        ):
+            raise Held("recovery: not the exact original held T-0003 planning attempt")
+        info = self.policy_path.stat()
+        if (
+            info.st_uid != self.uid
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_ctime_ns
+            > (self.directory / "plan.attempt.json").stat().st_mtime_ns
+            or "system.posix_acl_access" in os.listxattr(self.policy_path)
+        ):
+            raise Held(
+                "recovery: historical private policy protection is not established"
+            )
+        plan_path = Path(p["gateway_state"]) / "cto-plans" / "dev-v1-accept-T-0003.json"
+        specs = list((Path(p["repository"]) / ".dev/tasks").glob("T-0003-*.md"))
+        if len(specs) != 1:
+            raise Held("recovery: canonical task is not unique")
+        spec_sha = digest(self.owned(specs[0], self.alfred_uid))
+        route_path = Path(p["grant_root"]) / f"request-route-{job['request_id']}.json"
+        route_raw = self.owned(route_path, self.alfred_uid)
+        route = json.loads(route_raw)
+        if (
+            route.get("project") != job["project"]
+            or route.get("request_id") != job["request_id"]
+            or route.get("owner_id") != job["owner_id"]
+            or route.get("space_id") != job["space_id"]
+            or not route.get("confirmation_event_id")
+            or not route.get("native_reply_target")
+            or route.get("confirmation_event_id") == route.get("request_event_id")
+        ):
+            raise Held("recovery: native confirmed request binding differs")
+        bindings = {
+            "job_sha256": job_sha,
+            "original_attempt_sha256": attempt_sha,
+            "policy_sha256": policy_sha,
+            "spec_sha256": spec_sha,
+            "route_sha256": digest(route_raw),
+            "registry_sha256": digest(self.owned(Path(p["registry"]), self.alfred_uid)),
+            "runtime_sha256": {
+                n: digest(self.owned(self.library / n, self.uid)) for n in RUNTIME
+            },
+        }
+        return p, job, plan_path, bindings
+
+    def before(self, *, include_decision=False):
+        p, job, plan_path, bindings = self.core()
+        allowed = {"job.json", "plan.attempt.json", COPY}
+        if include_decision:
+            allowed.add(DECISION)
+        if any(path.name not in allowed for path in self.directory.iterdir()):
+            raise Held("recovery: additional handoff evidence requires investigation")
+        raw = self.owned(plan_path, self.alfred_uid)
+        plan = json.loads(raw)
+        if (
+            plan.get("project") != job["project"]
+            or plan.get("task_id") != job["task_id"]
+            or plan.get("request_id") != job["request_id"]
+            or plan.get("repository") != p["repository"]
+            or plan.get("spec_sha256") != bindings["spec_sha256"]
+            or "baseline_revision" in plan
+            or plan.get("delivery") != {"state": "pending", "message_id": None}
+            or plan_path.stat().st_mtime_ns
+            > (self.directory / "plan.attempt.json").stat().st_mtime_ns
+        ):
+            raise Held("recovery: original undelivered preliminary plan differs")
+
+        # Approval receipts bind tasks inside request/plan, not always at top level.
+        def matches(value):
+            if isinstance(value, dict):
+                return (value.get("project"), value.get("task_id")) == TARGET or any(
+                    matches(v) for v in value.values()
+                )
+            return isinstance(value, list) and any(matches(v) for v in value)
+
+        for path in Path(p["grant_root"]).glob("*.json"):
+            if matches(json.loads(self.owned(path, self.alfred_uid))):
+                raise Held(
+                    "recovery: existing task approval evidence requires investigation"
+                )
+        bindings["preliminary_plan_sha256"] = digest(raw)
+        if (self.directory / COPY).exists():
+            self.protected(self.directory / COPY)
+            if digest(self.owned(self.directory / COPY, self.uid)) != digest(raw):
+                raise Held("recovery: preserved preliminary bytes differ")
+        return {
+            "schema": "alfred.fresh-v1-plan-recovery-inspection/1",
+            "project": TARGET[0],
+            "task_id": TARGET[1],
+            "bindings": bindings,
+        }, raw
+
+    def verify(self, now=None):
+        now = time.time() if now is None else now
+        record, _ = self.protected(self.directory / DECISION)
+        _policy, _job, plan_path, bindings = self.core()
+        if (
+            set(record)
+            != {
+                "schema",
+                "project",
+                "task_id",
+                "decision",
+                "reason",
+                "operator_reference",
+                "created_at",
+                "expires_at",
+                "inspection_sha256",
+                "bindings",
+            }
+            or record.get("schema") != SCHEMA
+            or (record.get("project"), record.get("task_id")) != TARGET
+            or record.get("decision") != "one_new_planning_attempt_only"
+            or record.get("reason")
+            != "confirmed_policy_read_eacces_before_prepare_plan"
+            or not isinstance(record.get("operator_reference"), str)
+            or not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", record["operator_reference"]
+            )
+            or any(
+                type(record.get(k)) not in (int, float)
+                for k in ("created_at", "expires_at")
+            )
+            or record["expires_at"] != record["created_at"] + 3600
+        ):
+            raise Held("recovery: invalid operator decision")
+        copy, _ = self.protected(self.directory / COPY)
+        bindings["preliminary_plan_sha256"] = digest(
+            self.owned(self.directory / COPY, self.uid)
+        )
+        inspection = {
+            "schema": "alfred.fresh-v1-plan-recovery-inspection/1",
+            "project": TARGET[0],
+            "task_id": TARGET[1],
+            "bindings": bindings,
+        }
+        if (
+            bindings != record["bindings"]
+            or digest(canonical(inspection)) != record["inspection_sha256"]
+        ):
+            raise Held("recovery: pinned task, policy, runtime or evidence changed")
+        if copy.get("spec_sha256") != bindings["spec_sha256"]:
+            raise Held("recovery: preserved preliminary plan is not the canonical task")
+        attempted, result = self.directory / ATTEMPT, self.directory / RESULT
+        if not attempted.exists():
+            if not record["created_at"] <= now <= record["expires_at"]:
+                raise Held(
+                    "recovery: unused operator decision expired or is future-dated"
+                )
+            # Run the same no-effects gate without accepting a fabricated result/context.
+            names = {x.name for x in self.directory.iterdir()}
+            if names != {"job.json", "plan.attempt.json", COPY, DECISION}:
+                raise Held("recovery: unexpected evidence before the new attempt")
+            if (
+                digest(self.owned(plan_path, self.alfred_uid))
+                != bindings["preliminary_plan_sha256"]
+            ):
+                raise Held("recovery: preliminary plan changed before dispatch")
+            report, _ = self.before(include_decision=True)
+            if digest(canonical(report)) != record["inspection_sha256"]:
+                raise Held("recovery: pre-dispatch inspection differs")
+        else:
+            attempt, _ = self.protected(attempted)
+            if attempt != {
+                "stage": "plan-recovery-1",
+                "status": "uncertain_until_result",
+            }:
+                raise Held("recovery: new attempt record differs")
+            if result.exists():
+                context, _ = self.protected(self.directory / "context.json")
+                finished, _ = self.protected(result)
+                if context != finished or digest(
+                    self.owned(plan_path, self.alfred_uid)
+                ) != finished.get("plan_sha256"):
+                    raise Held("recovery: completed context/plan evidence differs")
+        return True
+
+
+def verify(policy_path, directory):
+    return Evidence(policy_path, directory).verify()
+
+
+def authorize(evidence, inspection_sha256, operator_reference, *, now=None):
+    now = time.time() if now is None else now
+    policy, _ = evidence.protected(evidence.policy_path)
+    if not (Path(policy["gateway_state"]) / "PAUSE").is_file():
+        raise Held("recovery: operator PAUSE required")
+    if (evidence.directory / DECISION).exists():
+        raise Held(
+            "recovery: operator decision already exists; never renew or overwrite"
+        )
+    report, raw = evidence.before()
+    if digest(canonical(report)) != inspection_sha256:
+        raise Held("recovery: inspection pin differs")
+    if (
+        not isinstance(operator_reference, str)
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", operator_reference)
+        is None
+    ):
+        raise Held("recovery: explicit operator decision reference required")
+    saved = evidence.directory / COPY
+    if not saved.exists():
+        # Preserve the actual original bytes, not a reconstructed plan object.
+        fd = os.open(saved, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+    # A partial preparation without this final record cannot authorize dispatch.
+    write_once(
+        evidence.directory / DECISION,
+        {
+            "schema": SCHEMA,
+            "project": TARGET[0],
+            "task_id": TARGET[1],
+            "decision": "one_new_planning_attempt_only",
+            "reason": "confirmed_policy_read_eacces_before_prepare_plan",
+            "operator_reference": operator_reference,
+            "created_at": now,
+            "expires_at": now + 3600,
+            "inspection_sha256": inspection_sha256,
+            "bindings": report["bindings"],
+        },
+    )
+
+
+def main():
+    if os.geteuid() != 0:
+        raise PermissionError("existing privileged operator boundary required")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("action", choices=("inspect", "verify", "authorize"))
+    parser.add_argument("--inspection-sha256")
+    parser.add_argument("--operator-reference")
+    args = parser.parse_args()
+    p = Path("/etc/alfred-fresh-v1/policy.json")
+    evidence = Evidence(p, Path("/var/lib/alfred-v1-handoffs/dev-v1-accept/T-0003"))
+    if args.action == "inspect":
+        print(canonical(evidence.before()[0]).decode(), end="")
+    elif args.action == "verify":
+        evidence.verify()
+        print('{"status":"RECOVERY_EVIDENCE_VERIFIED_NO_EXECUTION"}')
+    else:
+        # Existing poll lock only; never create/replace task attempts or invoke a role.
+        fd = os.open(
+            evidence.directory.parent.parent / ".poll.lock", os.O_RDWR | os.O_NOFOLLOW
+        )
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            authorize(evidence, args.inspection_sha256, args.operator_reference)
+        finally:
+            os.close(fd)
+        print('{"status":"ONE_PLANNING_RECOVERY_AUTHORIZED_HELD"}')
+
+
+if __name__ == "__main__":
+    main()

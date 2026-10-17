@@ -1,0 +1,15 @@
+[Unit]
+Description=File confirmed requests and plan canonical tasks with Central CTO
+ConditionPathIsDirectory=/home/alfred/Alfred/projects/hermes-requests/inbox
+
+[Service]
+Type=oneshot
+User=alfred
+Group=alfred
+WorkingDirectory=/home/alfred/Git/alfred
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPATH=/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src
+ExecStart=/home/alfred/Git/alfred/.venv/bin/python -B /home/alfred/Git/alfred/.dev/bin/gateway.py run-once --intake-dir /home/alfred/Alfred/projects/hermes-requests
+ExecStartPost=/home/alfred/Git/alfred/.venv/bin/python -B /home/alfred/Git/alfred/.dev/bin/cto.py poll
+UMask=0077
+NoNewPrivileges=yes

@@ -1,0 +1,17 @@
+{
+  "archive": "/home/alfred/alfred-development-lab/milestone2/task-a/dist/alfred-fresh-v1-1.0.1-T0003-recovery.1.tar.gz",
+  "files": 9,
+  "installer_sha256": "d697f535f0160619ae68f41576f32b46317ed580ddf63a55a8a7373561f5f0dd",
+  "manifest_sha256": "267a8d279a61c9d288ef23df860efc23c9d8b0989b5e6f925aeecd5c0ced1bc3",
+  "runtime_sha256": {
+    "fresh_v1/handoffs.py": "09568b8de620b61c28dbf4c4a3be824c7e4eecd3800aaa47d6858a13ad066ebb",
+    "fresh_v1/host.py": "9cb19786ec25b87de5012704fb739b7c8bce9bacdad38469c41b774909ce2b73",
+    "fresh_v1/recovery.py": "d6e3f3627f5f6c82223fe16dab7ef43d619cda4d98c4edf99467a76c0df688c4"
+  },
+  "sha256": "f6740a605e99d80131d020b0243b019cf8ca13f6dbdf3c9ef60c6a48fdbe1bca",
+  "tests": {
+    "passed": 331,
+    "skipped": 2,
+    "subtests_passed": 58
+  }
+}

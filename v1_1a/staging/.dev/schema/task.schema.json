@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hrsnyde1/alfred/.dev/schema/task.schema.json",
+  "title": "Alfred development task spec",
+  "description": "Normalised form of a .dev/tasks/T-NNNN-<slug>.md file: YAML frontmatter fields plus the body sections. Alfred/OpenClaw generate specs against this contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "title", "status", "source", "company", "created", "sections"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^T-[0-9]{4}$"},
+    "title": {"type": "string", "minLength": 5, "maxLength": 120},
+    "status": {
+      "enum": ["proposed", "ready", "in_progress", "in_review", "pr_open", "done", "blocked", "rejected"]
+    },
+    "source": {"enum": ["hrsnyde1", "hermes", "openclaw"]},
+    "risk": {"enum": ["low", "medium", "high", null]},
+    "company": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"},
+    "created": {"type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+    "approved_by": {"type": ["string", "null"], "enum": ["hrsnyde1", null]},
+    "branch": {"type": ["string", "null"], "pattern": "^claude/T-[0-9]{4}-[a-z0-9-]+$"},
+    "pr": {"type": ["string", "null"], "pattern": "^https://github\\.com/[^/]+/[^/]+/pull/[0-9]+$"},
+    "project": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"},
+    "request_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "sections": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "objective", "scope", "requirements", "constraints", "acceptance_criteria",
+        "security_considerations", "testing_requirements", "implementation_notes", "log"
+      ],
+      "properties": {
+        "objective": {"$ref": "#/$defs/text"},
+        "scope": {"$ref": "#/$defs/text"},
+        "requirements": {"$ref": "#/$defs/text"},
+        "constraints": {"$ref": "#/$defs/text"},
+        "acceptance_criteria": {"$ref": "#/$defs/text", "pattern": "- \\[[ xX]\\] \\S"},
+        "security_considerations": {"$ref": "#/$defs/text"},
+        "testing_requirements": {"$ref": "#/$defs/text"},
+        "permitted_paths": {"$ref": "#/$defs/text"},
+        "implementation_notes": {"type": "string", "maxLength": 20000},
+        "log": {"type": "string", "maxLength": 20000}
+      }
+    }
+  },
+  "$defs": {
+    "text": {"type": "string", "minLength": 1, "maxLength": 20000}
+  }
+}

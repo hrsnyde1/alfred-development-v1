@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "alfred.reviewer-handoff/1",
+  "type": "object",
+  "required": ["schema", "project", "task_id", "final_revision", "baseline_revision", "developer_commits", "changed_file_hashes", "qa_report_sha256", "decision", "next_stage"],
+  "properties": {"schema": {"const": "alfred.reviewer-handoff/1"}, "project": {"type": "string"}, "task_id": {"type": "string"}, "final_revision": {"type": "string"}, "baseline_revision": {"type": "string"}, "developer_commits": {"type": "array", "items": {"type": "string"}}, "changed_file_hashes": {"type": "object"}, "qa_report_sha256": {"type": "string"}, "decision": {"const": "PASS"}, "next_stage": {"const": "independent_reviewer"}},
+  "additionalProperties": false
+}

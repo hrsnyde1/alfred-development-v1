@@ -1,0 +1,17 @@
+{
+  "activation": "disabled",
+  "archive_sha256": "a8c550a2a86e5eb8840b9cd85bc5847261cd2fd5c71bcfdd93f4e19dd6a4da3c",
+  "developer_inventory_files": 29,
+  "inventory_files": 196,
+  "junit_errors": 0,
+  "junit_failures": 0,
+  "live_readiness": "BLOCKED pending operator host verification and authorization",
+  "manifest_sha256": "e5d76646988548dce178f3d0f734def52cd974c1796ec85aa04ebe9e802c1a56",
+  "production_modified": false,
+  "pytest_passed": 269,
+  "release": "1.0.1",
+  "schema": "alfred.fresh-v1-staging-verification/1",
+  "skipped": 2,
+  "status": "PASS",
+  "subtests_passed": 58
+}

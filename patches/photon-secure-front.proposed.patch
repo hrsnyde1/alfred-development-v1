@@ -1,0 +1,641 @@
+--- a/plugins/platforms/photon/sidecar/index.mjs
++++ b/plugins/platforms/photon/sidecar/index.mjs
+@@ -1,6 +1,6 @@
+ // Hermes Agent — Photon Spectrum sidecar
+ //
+-// Spawned by `plugins/platforms/photon/adapter.py` to bridge BOTH directions
++// Launched by the protected Photon service to bridge BOTH directions
+ // of messaging to Photon's Spectrum platform via the `spectrum-ts` SDK (the
+ // SDK is TypeScript-only, so a Node sidecar is unavoidable — there is no
+ // Python SDK and no public HTTP message API).
+@@ -8,13 +8,13 @@
+ // Inbound  (gRPC -> Hermes): the SDK's `app.messages` async iterator is a
+ //   long-lived gRPC stream. We serialize each `[space, message]` to a
+ //   normalized JSON event and stream it to the Python adapter over a
+-//   loopback `GET /inbound` (NDJSON). We pause pulling from the stream while
++//   private Unix `GET /inbound` (NDJSON). We pause pulling while
+ //   no consumer is attached so a backlog isn't pulled-and-lost before the
+ //   gateway connects.
+ // Outbound (Hermes -> gRPC): `/send` drives `space.send(...)`; `/typing`
+ //   sends the documented `typing("start" | "stop")` content builder.
+ //
+-// Protocol (all requests require `X-Hermes-Sidecar-Token: ${TOKEN}`):
++// Protected-only protocol (Unix socket plus private bearer token):
+ //   - GET  /inbound    -> 200 NDJSON stream; one JSON event per line, blank
+ //                         lines are heartbeats. One consumer at a time.
+ //   - POST /healthz     -> {"ok": true}
+@@ -23,10 +23,7 @@
+ //              "format": "text" | "markdown" (default "text")}
+ //   - POST /send-richlink -> {"ok": true, "messageId": "..."}
+ //       body: {"spaceId": "...", "url": "https://..."}
+-//   - POST /send-attachment -> {"ok": true, "messageId": "..."}
+-//       body: {"spaceId": "...", "path": "...", "name": "..." | null,
+-//              "mimeType": "..." | null, "caption": "..." | null,
+-//              "kind": "attachment" | "voice"}
++//   - /send-attachment is removed in the protected Task A candidate.
+ //   - POST /react       -> {"ok": true, "reactionId": "..." | null}
+ //       body: {"spaceId": "...", "messageId": "<target msg id>",
+ //              "emoji": "👀"}
+@@ -52,10 +49,9 @@
+ // Env vars (required):
+ //   PHOTON_PROJECT_ID      (== the project's spectrumProjectId)
+ //   PHOTON_PROJECT_SECRET
+-//   PHOTON_SIDECAR_PORT
++//   PHOTON_PRIVATE_SOCKET  (/run/alfred-photon-intake/private.sock)
+ //   PHOTON_SIDECAR_TOKEN
+ // Optional:
+-//   PHOTON_SIDECAR_BIND    (default 127.0.0.1)
+ //   PHOTON_SIDECAR_WATCH_STDIN  "1" = exit when stdin hits EOF (set by the
+ //                          adapter, which holds our stdin pipe — parent-death
+ //                          detection so a dead gateway can't orphan us)
+@@ -63,6 +59,8 @@
+ //                          default off — toggle with `hermes photon telemetry`)
+ 
+ import http from "node:http";
++import fs from "node:fs";
++import path from "node:path";
+ import crypto from "node:crypto";
+ import { once } from "node:events";
+ import { patchSpectrumTs } from "./patch-spectrum-mixed-attachments.mjs";
+@@ -76,8 +74,14 @@
+ 
+ const projectId = process.env.PHOTON_PROJECT_ID;
+ const projectSecret = process.env.PHOTON_PROJECT_SECRET;
+-const port = parseInt(process.env.PHOTON_SIDECAR_PORT || "8789", 10);
+-const bind = process.env.PHOTON_SIDECAR_BIND || "127.0.0.1";
++const privateSocket = process.env.PHOTON_PRIVATE_SOCKET;
++if (!privateSocket || !path.isAbsolute(privateSocket)) {
++  throw new Error("absolute protected Photon socket path required");
++}
++const privateParent = fs.lstatSync(path.dirname(privateSocket));
++if (!privateParent.isDirectory() || privateParent.uid !== process.getuid() || (privateParent.mode & 0o022) !== 0) {
++  throw new Error("unsafe protected Photon socket directory");
++}
+ const sharedToken = process.env.PHOTON_SIDECAR_TOKEN;
+ const telemetry = /^(1|true|yes|on)$/i.test(
+   (process.env.PHOTON_TELEMETRY || "").trim()
+@@ -342,6 +346,119 @@
+ // sidecar at import — /send-effect then rejects with "unsupported effect".
+ const MESSAGE_EFFECTS = imessage?.effect?.message || {};
+ 
++// Protected Task A event spool. This code is inserted into the pinned sidecar.
++const eventSpool = process.env.PHOTON_EVENT_SPOOL;
++if (!eventSpool || !path.isAbsolute(eventSpool)) {
++  throw new Error("absolute protected Photon event spool required");
++}
++const spoolInfo = fs.lstatSync(eventSpool);
++if (!spoolInfo.isDirectory() || spoolInfo.uid !== process.getuid() ||
++    (spoolInfo.mode & 0o077) !== 0) {
++  throw new Error("unsafe protected Photon event spool");
++}
++const spoolFd = fs.openSync(eventSpool, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
++const pendingDeliveries = new Map();
++const deliveryWaiters = new Map();
++const liveReadReceipts = new Map();
++const MAX_SPOOLED_EVENTS = 1024;
++const MAX_SPOOLED_BYTES = 64 * 1024;
++
++function spoolPath(id) {
++  if (!/^[0-9a-f]{32}$/.test(id)) throw new Error("invalid Photon delivery id");
++  return path.join(eventSpool, id + ".json");
++}
++
++const startupSpoolNames = fs.readdirSync(eventSpool);
++if (startupSpoolNames.length > MAX_SPOOLED_EVENTS) throw new Error("Photon spool capacity exceeded");
++for (const name of startupSpoolNames) {
++  if (!/^[0-9a-f]{32}\.json$/.test(name)) {
++    if (name.endsWith(".tmp")) continue; // interrupted pre-commit write
++    throw new Error("unexpected Photon spool entry");
++  }
++  const id = name.slice(0, 32);
++  const info = fs.lstatSync(spoolPath(id));
++  if (!info.isFile() || info.nlink !== 1 || info.uid !== process.getuid() || info.size > MAX_SPOOLED_BYTES) {
++    throw new Error("unsafe Photon spool record");
++  }
++  const record = JSON.parse(fs.readFileSync(spoolPath(id), "utf8"));
++  if (record.deliveryId !== id || !record.event || typeof record.event !== "object") {
++    throw new Error("invalid Photon spool record");
++  }
++  pendingDeliveries.set(id, record);
++}
++if (pendingDeliveries.size > MAX_SPOOLED_EVENTS) throw new Error("Photon spool capacity exceeded");
++
++function persistDelivery(event, sdkMessage) {
++  if (pendingDeliveries.size >= MAX_SPOOLED_EVENTS) throw new Error("Photon spool capacity reached");
++  const deliveryId = crypto.randomBytes(16).toString("hex");
++  let record = { deliveryId, event };
++  let payload = Buffer.from(JSON.stringify(record));
++  if (payload.length > MAX_SPOOLED_BYTES) {
++    // An unsupported oversized event still gets a durable decision. The
++    // broker rejects this content-free sentinel and audits the refusal.
++    record = { deliveryId, event: { deliveryError: "oversized" } };
++    payload = Buffer.from(JSON.stringify(record));
++    console.error("photon-sidecar: oversized event queued for explicit rejection");
++  }
++  const target = spoolPath(deliveryId);
++  const temporary = path.join(eventSpool, deliveryId + ".tmp");
++  const fd = fs.openSync(temporary, "wx", 0o600);
++  try {
++    fs.writeFileSync(fd, payload);
++    fs.fsyncSync(fd);
++  } finally {
++    fs.closeSync(fd);
++  }
++  fs.renameSync(temporary, target);
++  fs.fsyncSync(spoolFd);
++  pendingDeliveries.set(deliveryId, record);
++  if (sdkMessage) liveReadReceipts.set(deliveryId, sdkMessage);
++  return record;
++}
++
++async function deliverUntilAck(record) {
++  const id = record.deliveryId;
++  while (pendingDeliveries.has(id)) {
++    let timer;
++    const acknowledged = new Promise((resolve) => deliveryWaiters.set(id, resolve));
++    await deliver(JSON.stringify({ ...record.event, deliveryId: id }));
++    try {
++      await Promise.race([acknowledged, new Promise((resolve) => {
++        timer = setTimeout(resolve, 5000);
++      })]);
++    } finally {
++      if (timer) clearTimeout(timer);
++      deliveryWaiters.delete(id);
++    }
++  }
++}
++
++async function replayPendingDeliveries() {
++  for (const record of pendingDeliveries.values()) await deliverUntilAck(record);
++}
++
++async function acknowledgeDelivery(body, res) {
++  const id = body?.deliveryId;
++  const decision = body?.decision;
++  if (typeof id !== "string" || !/^[0-9a-f]{32}$/.test(id) ||
++      (decision !== "accepted" && decision !== "rejected" && decision !== "held") || !pendingDeliveries.has(id)) {
++    return badRequest(res, "unknown Photon delivery");
++  }
++  try {
++    fs.unlinkSync(spoolPath(id));
++  } catch (error) {
++    if (error?.code !== "ENOENT") throw error;
++  }
++  fs.fsyncSync(spoolFd);
++  pendingDeliveries.delete(id);
++  const waiter = deliveryWaiters.get(id);
++  if (waiter) waiter();
++  const message = liveReadReceipts.get(id);
++  liveReadReceipts.delete(id);
++  const readReceiptOk = decision === "accepted" && message ? await acknowledgeInboundRead(message) : true;
++  return ok(res, { readReceiptOk });
++}
++
+ // ---------------------------------------------------------------------------
+ // Inbound: forward `app.messages` (gRPC stream) to the Python consumer.
+ 
+@@ -456,7 +573,7 @@
+     );
+     return meta;
+   }
+-  if (typeof content.read === "function") {
++  if (typeof content.read === "function" && !process.env.PHOTON_EVENT_SPOOL) {
+     try {
+       const buf = await content.read();
+       // Guard the case where size was unknown but the bytes turn out to be
+@@ -625,17 +742,19 @@
+   "false";
+ 
+ async function acknowledgeInboundRead(message) {
+-  if (!readReceiptsEnabled) return;
+-  if (message?.content?.type === "read") return;
+-  if (typeof message?.read !== "function") return;
++  if (!readReceiptsEnabled) return true;
++  if (message?.content?.type === "read") return true;
++  if (typeof message?.read !== "function") return true;
+   try {
+-    await message.read();
++    await Promise.race([message.read(), new Promise((_, reject) =>
++      setTimeout(() => reject(new Error("read receipt deadline")), 3000))]);
++    return true;
+   } catch (error) {
+     // Read receipts are presence polish, not a delivery dependency.
+     console.warn(
+-      "photon-sidecar: failed to mark inbound message read: " +
+-        (error?.message || String(error))
++      "photon-sidecar: read receipt failed"
+     );
++    return false;
+   }
+ }
+ 
+@@ -659,9 +778,9 @@
+     };
+   } catch (e) {
+     console.error(
+-      "photon-sidecar: failed to normalize inbound message: " + String(e)
++      "photon-sidecar: inbound normalization failed"
+     );
+-    return null;
++    return { deliveryError: "normalization" };
+   }
+ }
+ 
+@@ -698,6 +817,7 @@
+   let backoff = 1000;
+   for (;;) {
+     try {
++      await replayPendingDeliveries();
+       for await (const [space, message] of app.messages) {
+         backoff = 1000; // healthy traffic — reset
+         markStreamHealthy();
+@@ -711,14 +831,16 @@
+         rememberKnownMessage(message);
+         const event = await normalizeEvent(space, message);
+         if (!event) continue;
+-        await deliver(JSON.stringify(event));
+-        await acknowledgeInboundRead(message);
++        let record;
++        try { record = persistDelivery(event, message); }
++        catch { console.error("photon-sidecar: durable event acceptance unavailable"); process.exit(70); }
++        await deliverUntilAck(record);
+       }
+       console.error("photon-sidecar: inbound stream ended — re-subscribing");
+       markStreamRecovering("inbound stream ended");
+     } catch (e) {
+       const reason = e && e.message ? e.message : String(e);
+-      console.error(inboundStreamErrorMessage(e));
++      console.error("photon-sidecar: inbound stream failed; recovery scheduled");
+       markStreamRecovering(reason);
+     }
+     await new Promise((r) =>
+@@ -1064,6 +1186,7 @@
+       return;
+     }
+     const body = await readBody(req);
++    if (req.url === "/ack") return acknowledgeDelivery(body, res);
+     if (req.url === "/send") {
+       const { spaceId, text, format = "text" } = body || {};
+       if (!spaceId || typeof text !== "string") {
+@@ -1095,41 +1218,6 @@
+       }
+       const space = await resolveSpace(spaceId);
+       const result = await space.send(spectrumRichlink(url.trim()));
+-      return ok(res, { messageId: result?.id || null });
+-    }
+-    if (req.url === "/send-attachment") {
+-      const { spaceId, path, name, mimeType, caption, kind } =
+-        body || {};
+-      if (!spaceId || typeof path !== "string" || !path) {
+-        return badRequest(res, "spaceId and path are required");
+-      }
+-      const space = await resolveSpace(spaceId);
+-
+-      // spectrum-ts infers name + MIME from the file extension; pass
+-      // overrides only when Hermes supplied them so a known-good
+-      // inference isn't clobbered with an empty string.
+-      const opts = {};
+-      if (name) opts.name = name;
+-      if (mimeType) opts.mimeType = mimeType;
+-      const builder =
+-        kind === "voice"
+-          ? voice(path, Object.keys(opts).length ? opts : undefined)
+-          : attachment(path, Object.keys(opts).length ? opts : undefined);
+-
+-      const result = await space.send(builder);
+-
+-      // iMessage delivers the caption as a separate bubble; send it
+-      // after the media so the attachment renders first.
+-      if (caption && typeof caption === "string") {
+-        try {
+-          await space.send(spectrumText(caption));
+-        } catch (e) {
+-          console.error(
+-            "photon-sidecar: attachment sent but caption failed: " +
+-              (e && e.stack ? e.stack : String(e))
+-          );
+-        }
+-      }
+       return ok(res, { messageId: result?.id || null });
+     }
+     if (req.url === "/react") {
+@@ -1236,8 +1324,7 @@
+     return res.end(JSON.stringify({ ok: false, error: "not found" }));
+   } catch (e) {
+     console.error(
+-      "photon-sidecar: handler error: " +
+-        (e && e.stack ? e.stack : String(e))
++      "photon-sidecar: private handler failed"
+     );
+     // serverError() intentionally returns a generic message — see its
+     // body for the rationale.
+@@ -1245,8 +1332,10 @@
+   }
+ });
+ 
+-server.listen(port, bind, () => {
+-  console.error(`photon-sidecar: listening on ${bind}:${port}`);
++process.umask(0o077); // socket is private from bind, before chmod callback
++server.listen(privateSocket, () => {
++  fs.chmodSync(privateSocket, 0o600);
++  console.error("photon-sidecar: protected Unix socket ready");
+ });
+ 
+ let stopping = false;
+@@ -1262,9 +1351,13 @@
+       new Promise((resolve) => setTimeout(resolve, 3000)),
+     ]);
+   } catch (e) {
+-    console.error("photon-sidecar: app.stop() failed: " + String(e));
+-  }
+-  server.close(() => process.exit(0));
++    console.error("photon-sidecar: SDK shutdown failed");
++  }
++  server.close(() => {
++    try { fs.unlinkSync(privateSocket); } catch { /* protected runtime cleanup */ }
++    fs.closeSync(spoolFd);
++    process.exit(0);
++  });
+   setTimeout(() => process.exit(1), 500).unref();
+ }
+ 
+@@ -1288,7 +1381,6 @@
+ // a real fatal exit).
+ process.on("unhandledRejection", (reason) => {
+   console.error(
+-    "photon-sidecar: unhandledRejection: " +
+-      (reason && reason.stack ? reason.stack : String(reason))
++    "photon-sidecar: unhandled rejection"
+   );
+ });
+--- a/plugins/platforms/photon/adapter.py
++++ b/plugins/platforms/photon/adapter.py
+@@ -8,6 +8,7 @@
+ from __future__ import annotations
+ 
+ import asyncio
++import contextvars
+ import base64
+ import json
+ import logging
+@@ -55,6 +56,7 @@
+ import contextlib
+ 
+ logger = logging.getLogger(__name__)
++_task_a_reply_binding = contextvars.ContextVar("photon_task_a_reply_binding", default=None)
+ 
+ _DEFAULT_SIDECAR_PORT = 8789
+ _DEFAULT_SIDECAR_BIND = "127.0.0.1"
+@@ -216,6 +218,8 @@
+     """Report readiness or permission to prepare at connect; never provision here."""
+     from pm import lazy_installs_allowed
+ 
++    if _get_scoped_secret("PHOTON_TASK_A_BROKER_SOCKET"):
++        return HTTPX_AVAILABLE
+     can_prepare = lazy_installs_allowed()
+     if not HTTPX_AVAILABLE:
+         logger.warning("photon: httpx not installed — pip install httpx")
+@@ -311,6 +315,8 @@
+ 
+ 
+ def validate_config(cfg: PlatformConfig) -> bool:
++    if _get_scoped_secret("PHOTON_TASK_A_BROKER_SOCKET"):
++        return True
+     extra = cfg.extra or {}
+     if (extra.get("project_id") or _get_scoped_secret("PHOTON_PROJECT_ID")) and (
+             extra.get("project_secret") or _get_scoped_secret("PHOTON_PROJECT_SECRET")):
+@@ -325,6 +331,8 @@
+ 
+ def _env_enablement() -> Optional[dict]:
+     """``env_enablement_fn``: seed ``PlatformConfig.extra`` so env-only setups appear in status."""
++    if _get_scoped_secret("PHOTON_TASK_A_BROKER_SOCKET"):
++        return {"task_a_broker_socket": _get_scoped_secret("PHOTON_TASK_A_BROKER_SOCKET")}
+     project_id, project_secret = load_project_credentials()
+     if not (project_id and project_secret):
+         return None
+@@ -564,17 +572,18 @@
+     def __init__(self, config: PlatformConfig):
+         super().__init__(config, Platform("photon"))
+         extra = config.extra or {}
+-        # Project credentials: env wins, then config.extra, then auth.json.
+-        stored_id, stored_sec = load_project_credentials()
+-        self._project_id: str = _get_scoped_secret("PHOTON_PROJECT_ID") or extra.get("project_id") or stored_id or ""
+-        self._project_secret: str = (
++        # Secure Task A mode never loads Photon credentials into Hermes.
++        self._task_a_socket = _get_scoped_secret("PHOTON_TASK_A_BROKER_SOCKET") or None
++        stored_id, stored_sec = ("", "") if self._task_a_socket else load_project_credentials()
++        self._project_id: str = "" if self._task_a_socket else (_get_scoped_secret("PHOTON_PROJECT_ID") or extra.get("project_id") or stored_id or "")
++        self._project_secret: str = "" if self._task_a_socket else (
+             _get_scoped_secret("PHOTON_PROJECT_SECRET") or extra.get("project_secret") or stored_sec or "")
+         self._sidecar_port = _coerce_port(
+             extra.get("sidecar_port") or _get_scoped_secret("PHOTON_SIDECAR_PORT"), _DEFAULT_SIDECAR_PORT)
+         self._sidecar_bind = _DEFAULT_SIDECAR_BIND
+-        self._sidecar_token = _get_scoped_secret("PHOTON_SIDECAR_TOKEN") or secrets.token_hex(16)
++        self._sidecar_token = "" if self._task_a_socket else (_get_scoped_secret("PHOTON_SIDECAR_TOKEN") or secrets.token_hex(16))
+         autostart = str(_get_scoped_secret("PHOTON_SIDECAR_AUTOSTART", "true")).lower()
+-        self._autostart_sidecar = autostart not in ("0", "false", "no")
++        self._autostart_sidecar = not self._task_a_socket and autostart not in ("0", "false", "no")
+         self._node_bin = _get_scoped_secret("PHOTON_NODE_BIN") or find_node_executable("node")
+         # Presence watchdog (second layer behind the sidecar's own zombie-stream detection):
+         # respawns only when the sidecar's HTTP loop hangs; 10-min interval because shared
+@@ -587,7 +596,7 @@
+         self._probe_interval = _setting("probe_interval_seconds", "PHOTON_PROBE_INTERVAL_SECONDS", 600.0, float)
+         self._probe_timeout = _setting("probe_timeout_seconds", "PHOTON_PROBE_TIMEOUT_SECONDS", 10.0, float)
+         self._probe_max_failures = _setting("probe_max_failures", "PHOTON_PROBE_MAX_FAILURES", 3, int)
+-        self._probe_enabled = self._probe_interval > 0
++        self._probe_enabled = not self._task_a_socket and self._probe_interval > 0
+         # Never advertise fences: a URL-bearing message goes out as raw text (literal ```), and the
+         # markdown path renders a fence as inline Unicode monospace, not a block.
+         self.supports_code_blocks = False
+@@ -636,10 +645,10 @@
+     # -- Sidecar HTTP plumbing ------------------------------------------------------
+ 
+     def _sidecar_url(self, path: str) -> str:
+-        return f"http://{self._sidecar_bind}:{self._sidecar_port}{path}"
++        return f"http://task-a{path}" if self._task_a_socket else f"http://{self._sidecar_bind}:{self._sidecar_port}{path}"
+ 
+     def _sidecar_headers(self) -> dict[str, str]:
+-        return {"X-Hermes-Sidecar-Token": self._sidecar_token}
++        return {} if self._task_a_socket else {"X-Hermes-Sidecar-Token": self._sidecar_token}
+ 
+     # -- Connection lifecycle ------------------------------------------------------
+ 
+@@ -647,15 +656,24 @@
+         if not HTTPX_AVAILABLE:
+             self._set_fatal_error("MISSING_DEP", "httpx not installed", retryable=False)
+             return False
+-        if not self._project_id or not self._project_secret:
++        if not self._task_a_socket and (not self._project_id or not self._project_secret):
+             self._set_fatal_error(
+                 "MISSING_CREDENTIALS",
+                 "PHOTON_PROJECT_ID and PHOTON_PROJECT_SECRET are required. Run: hermes photon setup",
+                 retryable=False)
+             return False
+-        client = httpx.AsyncClient(timeout=30.0, trust_env=False)
++        transport = httpx.AsyncHTTPTransport(uds=self._task_a_socket) if self._task_a_socket else None
++        client = httpx.AsyncClient(transport=transport, timeout=30.0, trust_env=False)
+         self._http_client = client
+-        if self._autostart_sidecar:  # the sidecar holds the gRPC stream for BOTH directions: required now
++        if self._task_a_socket:
++            try:
++                await self._sidecar_call("/healthz", {})
++            except Exception as exc:
++                self._set_fatal_error("TASK_A_BROKER_FAILED", f"restricted broker unavailable: {exc}", retryable=True)
++                await client.aclose()
++                self._http_client = None
++                return False
++        if self._autostart_sidecar:  # legacy mode only; Task A owns the single protected stream
+             try:
+                 await self._start_sidecar()
+             except Exception as e:
+@@ -669,7 +687,7 @@
+                 await client.aclose()
+                 self._http_client = None
+                 return False
+-        else:
++        elif not self._task_a_socket:
+             logger.warning("[photon] sidecar autostart disabled — inbound + outbound will fail")
+         loop = asyncio.get_event_loop()
+         self._inbound_running = True
+@@ -697,7 +715,8 @@
+             if fffc_task and not fffc_task.done():
+                 fffc_task.cancel()
+         self._pending_fffc.clear()
+-        await self._stop_sidecar()
++        if not self._task_a_socket:
++            await self._stop_sidecar()
+         if self._http_client is not None:
+             with contextlib.suppress(Exception):
+                 await self._http_client.aclose()
+@@ -792,12 +811,22 @@
+             logger.debug("[photon] skipping non-JSON inbound line")
+             return
+         msg_id = event.get("messageId")
+-        if msg_id and self._dedup.is_duplicate(msg_id):
++        if msg_id and not self._task_a_socket and self._dedup.is_duplicate(msg_id):
+             return
++        binding_token = None
++        if self._task_a_socket:
++            handle = event.get("handle")
++            space_id = (event.get("space") or {}).get("id")
++            if not isinstance(handle, str) or not handle or not isinstance(space_id, str) or not space_id or not isinstance(msg_id, str):
++                return
++            binding_token = _task_a_reply_binding.set((handle, space_id, msg_id))
+         try:
+             await self._dispatch_inbound(event)
+         except Exception:
+             logger.exception("[photon] inbound dispatch failed")
++        finally:
++            if binding_token is not None:
++                _task_a_reply_binding.reset(binding_token)
+ 
+     async def _fffc_timeout_handler(self, chat_key: str, message_id: str) -> None:
+         await asyncio.sleep(_FFFC_WAIT_SECONDS)
+@@ -812,6 +841,39 @@
+         if live:
+             prev[1].cancel()
+         return live
++
++    def _task_a_job_binding(self, event: MessageEvent) -> tuple[str, str, str] | None:
++        """Recover the exact broker event from the queued job, not its creator task."""
++        raw = getattr(event, "raw_message", None)
++        if not isinstance(raw, dict):
++            return None
++        handle, message_id = raw.get("handle"), raw.get("messageId")
++        space = raw.get("space")
++        content = raw.get("content")
++        space_id = space.get("id") if isinstance(space, dict) else None
++        original_text = content.get("text") if isinstance(content, dict) else None
++        source = getattr(event, "source", None)
++        if (not isinstance(handle, str) or not handle or not isinstance(message_id, str)
++                or not isinstance(space_id, str) or not isinstance(original_text, str)
++                or getattr(source, "chat_id", None) != space_id
++                or getattr(event, "message_id", None) != message_id
++                or getattr(event, "text", None) != original_text):
++            return None
++        return handle, space_id, message_id
++
++    async def _process_message_background(self, event: MessageEvent, session_key: str) -> None:
++        if not self._task_a_socket:
++            return await super()._process_message_background(event, session_key)
++        binding = self._task_a_job_binding(event)
++        if binding is None:
++            logger.error("[photon] queued Task A event lost exact broker binding")
++            self._finish_session_task(session_key, self._active_sessions.get(session_key) or asyncio.Event())
++            return
++        token = _task_a_reply_binding.set(binding)
++        try:
++            return await super()._process_message_background(event, session_key)
++        finally:
++            _task_a_reply_binding.reset(token)
+ 
+     async def _dispatch_inbound(self, event: dict[str, Any]) -> None:
+         """Normalize a sidecar inbound event ``{messageId, space: {id, type: dm|group, phone},
+@@ -1516,6 +1578,8 @@
+                                        kind: str = "attachment") -> SendResult:
+         """POST a local file to ``/send-attachment``. ``kind="voice"`` sends audio as a voice
+         note (downgrades to a plain audio attachment where unsupported)."""
++        if self._task_a_socket:
++            return SendResult(success=False, error="Task A attachments disabled pending review")
+         safe_path = self.validate_media_delivery_path(str(path))  # send_*_file / cron may pass arbitrary strings
+         if not safe_path:
+             return SendResult(success=False, error=f"unsafe or missing attachment path: {path}")
+@@ -1529,7 +1593,16 @@
+             raise RuntimeError("Photon adapter not connected")
+         # Fresh client per call so this is safe from a worker thread with its own loop
+         # (send_message_tool via _run_async); the inbound loop keeps using _http_client.
+-        async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
++        if self._task_a_socket:
++            if path == "/send":
++                binding = _task_a_reply_binding.get()
++                if not binding or body.get("spaceId") != binding[1]:
++                    raise RuntimeError("missing or mismatched authenticated Photon event handle")
++                path, body = "/reply", {"handle": binding[0], "text": body.get("text")}
++            elif path != "/healthz":
++                raise RuntimeError("Task A restricted interface forbids this operation")
++        transport = httpx.AsyncHTTPTransport(uds=self._task_a_socket) if self._task_a_socket else None
++        async with httpx.AsyncClient(transport=transport, timeout=30.0, trust_env=False) as client:
+             resp = await client.post(self._sidecar_url(path), json=body, headers=self._sidecar_headers())
+         if resp.status_code != 200:
+             raise _sidecar_error_from_response(path, resp.status_code, resp.text)
+@@ -1698,17 +1771,17 @@
+     ctx.register_platform(
+         name="photon", label="iMessage via Photon", adapter_factory=lambda cfg: PhotonAdapter(cfg),
+         check_fn=check_requirements, validate_config=validate_config, is_connected=is_connected,
+-        required_env=["PHOTON_PROJECT_ID", "PHOTON_PROJECT_SECRET"],
++        required_env=[] if _get_scoped_secret("PHOTON_TASK_A_BROKER_SOCKET") else ["PHOTON_PROJECT_ID", "PHOTON_PROJECT_SECRET"],
+         install_hint=(
+             "Run: hermes photon setup  (logs in via device flow, creates a "
+             "Spectrum project, links your phone number, installs the "
+             "spectrum-ts sidecar)."),
+-        setup_fn=_cli.gateway_setup,  # surfaces Photon in the unified `hermes gateway setup` wizard
++        setup_fn=None if _get_scoped_secret("PHOTON_TASK_A_BROKER_SOCKET") else _cli.gateway_setup,
+         env_enablement_fn=_env_enablement, cron_deliver_env_var="PHOTON_HOME_CHANNEL",
+-        standalone_sender_fn=_standalone_send, allowed_users_env="PHOTON_ALLOWED_USERS",
++        standalone_sender_fn=None if _get_scoped_secret("PHOTON_TASK_A_BROKER_SOCKET") else _standalone_send, allowed_users_env="PHOTON_ALLOWED_USERS",
+         allow_all_env="PHOTON_ALLOW_ALL_USERS", max_message_length=_MAX_MESSAGE_LENGTH, emoji="📱",
+         pii_safe=True,  # E.164 phone numbers: redact session descriptions before they reach the LLM
+-        allow_update_command=True,
++        allow_update_command=not bool(_get_scoped_secret("PHOTON_TASK_A_BROKER_SOCKET")),
+         # Grounded in spectrum-ts markdownToIMessageText + sidecar send-format.mjs: headings -> bold, tables ->
+         # "a | b" rows, code -> Unicode math-monospace; any message containing a URL is stripped to plain text.
+         platform_hint=(
+@@ -1719,10 +1792,12 @@
+             "glyphs that break when copied. So no headers, tables, code fences or backticks; an occasional "
+             "**bold** word is fine in a message without links. Put a command or code snippet on its own line "
+             "as plain text so it copies and runs. Write links as bare URLs; a message that is only a URL "
+-            "sends as a rich preview card. You can send files natively: write MEDIA:/absolute/path/to/file "
+-            "in your response (images and video appear inline, audio as voice notes, other files as "
+-            "attachments). Recipient identifiers are E.164 phone numbers; never expose them in responses "
++            "sends as a rich preview card. "
++            + ("Attachments are disabled in Task A staging. " if _get_scoped_secret("PHOTON_TASK_A_BROKER_SOCKET") else
++               "You can send files natively using MEDIA:/absolute/path/to/file. ")
++            + "Recipient identifiers are E.164 phone numbers; never expose them in responses "
+             "unless the user asked."))
+-    ctx.register_cli_command(
+-        name="photon", help="Set up and manage the Photon iMessage integration",
+-        setup_fn=_cli.register_cli, handler_fn=_cli.dispatch)
++    if not _get_scoped_secret("PHOTON_TASK_A_BROKER_SOCKET"):
++        ctx.register_cli_command(
++            name="photon", help="Set up and manage the Photon iMessage integration",
++            setup_fn=_cli.register_cli, handler_fn=_cli.dispatch)

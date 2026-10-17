@@ -1,0 +1,24 @@
+{
+  "activating_active_deactivating_failed_nonzero_pid_idle_checks": "PASS",
+  "archive_sha256": "a0d47865f0722f40cd4196e9a218e541a8eb154f982757a6a0c457dd7c450194",
+  "existing_QA_Reviewer_Publisher_Completion_CTO_Intake_hashes_match": true,
+  "focused_tests_this_review": 30,
+  "gateway_pause_currently_present": false,
+  "host_procedure_sha256": "039deb64801be01993d5a9239f9e8a289b4756a105a1e2868f2ef3d6e3757d62",
+  "installed_Developer_manifest_files_verified": 29,
+  "installed_Fresh_V1_0_1_files_verified": 10,
+  "manifest_sha256": "6c65817bf16cc53c4dc91c87743e78f1cba88086db2c0a124a04d3b1c935413d",
+  "operator_bash_blocks_syntax_checked": 4,
+  "pause_create_preserve_and_symlink_refusal_fixture": "PASS",
+  "previous_regression": {
+    "passed": 299,
+    "skipped": 2,
+    "subtests_passed": 58
+  },
+  "production_changes": false,
+  "runtime_files": [
+    "host.py",
+    "role.py",
+    "diagnostics.py"
+  ]
+}

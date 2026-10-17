@@ -1,0 +1,22 @@
+{
+  "archive": "/home/alfred/alfred-development-lab/milestone2/task-a/dist/alfred-fresh-v1-1.0.1-planning-fix.1.tar.gz",
+  "files": 10,
+  "installer_sha256": "0cb7bc116ec83739361ce233530ca6297ee1dbd08a7fa99f5e400c501030230c",
+  "manifest_sha256": "6c65817bf16cc53c4dc91c87743e78f1cba88086db2c0a124a04d3b1c935413d",
+  "runtime_files": [
+    "fresh_v1/host.py",
+    "fresh_v1/role.py",
+    "fresh_v1/diagnostics.py"
+  ],
+  "runtime_sha256": {
+    "fresh_v1/diagnostics.py": "c5862c14b39b22b7e6faef07aea1d4c32b5ab0df20aab987d4a0fed33b763e0e",
+    "fresh_v1/host.py": "162d553df4512e235ba9a0a8ab8adb4187dde2a140c9c728c6e41c0958647954",
+    "fresh_v1/role.py": "99d43e22ace57b1cf4f97972e2e3755a8a2269d66f53f9078220b859407cd109"
+  },
+  "sha256": "a0d47865f0722f40cd4196e9a218e541a8eb154f982757a6a0c457dd7c450194",
+  "tests": {
+    "passed": 299,
+    "skipped": 2,
+    "subtests_passed": 58
+  }
+}

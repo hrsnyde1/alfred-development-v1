@@ -1,0 +1,16 @@
+{
+  "baseline_revision": "9000574c4c8807e84c4350e2fd342deeba341d7d",
+  "changed_file_hashes": {
+    "calculator.py": "8b7592a111b9a05664ec660fb67d926fa3810ff816dd5fb50ea37eae72284c5b"
+  },
+  "decision": "PASS",
+  "developer_commits": [
+    "867fde90acf3f0055af79bda53a0fccb55f6bf34"
+  ],
+  "final_revision": "89ba188f8a2f801d433a30c9c21363efb3e1043d",
+  "next_stage": "independent_reviewer",
+  "project": "dev-v1-accept",
+  "qa_report_sha256": "60f9f3e500aa7e13bf7957fbc22e05db3756980a2676df089201a0022624cebc",
+  "schema": "alfred.reviewer-handoff/1",
+  "task_id": "T-0002"
+}

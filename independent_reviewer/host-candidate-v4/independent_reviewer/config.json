@@ -1,0 +1,14 @@
+{
+  "schema": "alfred.reviewer-config/1",
+  "project": "dev-v1-accept",
+  "task_id": "T-0002",
+  "expected_qa_report_sha256": "c4e71ed4b4f24792d6354b3c7ebc46689869811ca4aca2c7c8217dcffa4817ea",
+  "model": {
+    "provider": "codex",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium",
+    "timeout_seconds": 180,
+    "cli": "/opt/alfred-reviewer-v1/bin/codex"
+  },
+  "max_diff_bytes": 131072
+}

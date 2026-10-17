@@ -1,0 +1,14 @@
+# CANDIDATE ONLY. Restricted Hermes listener; private sidecar socket is separate.
+[Unit]
+Description=Restricted Hermes-to-Photon front socket candidate
+
+[Socket]
+ListenStream=/run/alfred-photon-intake/hermes.sock
+SocketUser=alfredphoton
+SocketGroup=alfredhermes
+SocketMode=0660
+DirectoryMode=0751
+Service=alfred-photon-intake.service
+
+[Install]
+WantedBy=sockets.target

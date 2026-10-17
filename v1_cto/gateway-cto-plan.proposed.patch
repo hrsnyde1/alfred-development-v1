@@ -1,0 +1,28 @@
+--- a/.dev/bin/gateway.py
++++ b/.dev/bin/gateway.py
+@@ -608,6 +608,7 @@
+             "run",
+             "workflows",
+             "workflow",
++            "cto-plan",
+             *APPROVAL_COMMANDS,
+         ],
+     )
+@@ -672,6 +673,17 @@
+             return _workflows_command(args)
+         if args.command == "workflow":
+             return _workflow_command(args)
++        if args.command == "cto-plan":
++            from cto import CTOError, show_plan
++
++            try:
++                if not args.task:
++                    raise CTOError("task ID required")
++                print(json.dumps(show_plan(args.gateway_dir, args.project, args.task), indent=2))
++            except (CTOError, OSError) as exc:
++                print(f"CTO plan unavailable: {exc}", file=sys.stderr)
++                return 1
++            return 0
+         registry = load_checked_registry(args.registry)
+         if args.command == "pickup":
+             return _pickup_command(args, registry)

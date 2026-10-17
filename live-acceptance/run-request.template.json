@@ -1,0 +1,18 @@
+{
+  "schema": "alfred.developer-run-request/1",
+  "project": "dev-v1-accept",
+  "task_id": "T-0002",
+  "worktree_root": "/var/lib/alfred-development-worktrees",
+  "scope": ["calculator.py"],
+  "authorization_reference": "REPLACE_WITH_TRUSTED_GRANT_REFERENCE",
+  "items": [
+    {
+      "id": "backend-subtract",
+      "specialist": "backend",
+      "files": ["calculator.py"],
+      "depends_on": [],
+      "objective": "Add subtract(a, b) returning a minus b in calculator.py while preserving add(a, b)."
+    }
+  ],
+  "total_cost_limit": 2
+}

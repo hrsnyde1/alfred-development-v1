@@ -1,0 +1,11 @@
+{
+  "title": "Backend calculator subtract helper",
+  "task_type": "feature",
+  "objective": "Implement a backend subtract(a, b) helper in calculator.py that returns a minus b and makes the existing test_subtract pass.",
+  "scope": "Change only calculator.py in the disposable calculator repository.",
+  "requirements": "Keep add(a, b) working. Add subtract(a, b) using ordinary Python arithmetic. No new dependencies.",
+  "constraints": "One local code change only; no deployment, publication, or changes to other projects.",
+  "acceptance_criteria": "- [ ] add(7, 3) returns 10.\n- [ ] subtract(7, 3) returns 4.\n- [ ] The existing unittest discovery command passes.",
+  "security_considerations": "No external I/O, secrets, network access, or authority changes are needed.",
+  "testing_requirements": "Run /usr/bin/python3 -m unittest discover -v and record the result."
+}

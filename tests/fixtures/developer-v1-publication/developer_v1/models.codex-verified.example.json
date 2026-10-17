@@ -1,0 +1,22 @@
+{
+  "schema": "alfred.developer-models/1",
+  "providers": {
+    "codex": {
+      "gpt-6-sol": {"capabilities": ["code", "ui", "data", "analysis", "ml", "mobile"], "max_complexity": "high", "max_task_cost": 1},
+      "gpt-6.1-sol": {"capabilities": ["code", "ui", "data", "analysis", "ml", "mobile"], "max_complexity": "high", "max_task_cost": 1}
+    }
+  },
+  "specialists": {
+    "frontend": {"primary": {"provider": "codex", "model": "gpt-6-sol"}, "fallback": {"provider": "codex", "model": "gpt-6.1-sol"}, "reasoning_effort": "medium", "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"]},
+    "backend": {"primary": {"provider": "codex", "model": "gpt-6-sol"}, "fallback": {"provider": "codex", "model": "gpt-6.1-sol"}, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"]},
+    "full_stack": {"primary": {"provider": "codex", "model": "gpt-6-sol"}, "fallback": {"provider": "codex", "model": "gpt-6.1-sol"}, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"]},
+    "devops": {"primary": {"provider": "codex", "model": "gpt-6-sol"}, "fallback": {"provider": "codex", "model": "gpt-6.1-sol"}, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"]},
+    "data_engineer": {"primary": {"provider": "codex", "model": "gpt-6-sol"}, "fallback": {"provider": "codex", "model": "gpt-6.1-sol"}, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"]},
+    "data_scientist": {"primary": {"provider": "codex", "model": "gpt-6-sol"}, "fallback": {"provider": "codex", "model": "gpt-6.1-sol"}, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"]},
+    "ai_ml": {"primary": {"provider": "codex", "model": "gpt-6-sol"}, "fallback": {"provider": "codex", "model": "gpt-6.1-sol"}, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"]},
+    "integration": {"primary": {"provider": "codex", "model": "gpt-6-sol"}, "fallback": {"provider": "codex", "model": "gpt-6.1-sol"}, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"]},
+    "security": {"primary": {"provider": "codex", "model": "gpt-6-sol"}, "fallback": {"provider": "codex", "model": "gpt-6.1-sol"}, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"]},
+    "mobile": {"primary": {"provider": "codex", "model": "gpt-6-sol"}, "fallback": {"provider": "codex", "model": "gpt-6.1-sol"}, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"]},
+    "performance": {"primary": {"provider": "codex", "model": "gpt-6-sol"}, "fallback": {"provider": "codex", "model": "gpt-6.1-sol"}, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"]}
+  }
+}

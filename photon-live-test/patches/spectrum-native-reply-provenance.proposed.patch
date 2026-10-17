@@ -1,0 +1,44 @@
+--- a/plugins/platforms/photon/sidecar/node_modules/@spectrum-ts/imessage/dist/index.js
++++ b/plugins/platforms/photon/sidecar/node_modules/@spectrum-ts/imessage/dist/index.js
+@@ -393,6 +393,9 @@
+ 	isDelayed: z.boolean(),
+ 	sendErrorCode: z.number().int(),
+ 	nativeText: z.string().optional(),
++	nativeReplyTargetGuid: z.string().optional(),
++	nativeThreadOriginatorGuid: z.string().optional(),
++	nativeIsForward: z.boolean().optional(),
+ 	formatting: z.array(textFormatSchema).readonly(),
+ 	mentions: z.array(mentionSchema).readonly(),
+ 	subject: z.string().optional(),
+@@ -1015,6 +1018,9 @@
+ 	isDelayed: native.isDelayed,
+ 	sendErrorCode: native.sendErrorCode,
+ 	nativeText: native.content?.text,
++	nativeReplyTargetGuid: native.replyTargetGuid,
++	nativeThreadOriginatorGuid: native.threadOriginatorGuid,
++	nativeIsForward: native.isForward,
+ 	formatting: native.content?.formatting?.map(toTextFormat) ?? [],
+ 	mentions: native.content?.mentions?.map(toMention) ?? [],
+ 	subject: native.subject,
+--- a/plugins/platforms/photon/sidecar/node_modules/@spectrum-ts/imessage/dist/index.d.ts
++++ b/plugins/platforms/photon/sidecar/node_modules/@spectrum-ts/imessage/dist/index.d.ts
+@@ -382,6 +382,9 @@
+   isDelayed: z.ZodOptional<z.ZodBoolean>;
+   sendErrorCode: z.ZodOptional<z.ZodNumber>;
+   nativeText: z.ZodOptional<z.ZodOptional<z.ZodString>>;
++  nativeReplyTargetGuid: z.ZodOptional<z.ZodString>;
++  nativeThreadOriginatorGuid: z.ZodOptional<z.ZodString>;
++  nativeIsForward: z.ZodOptional<z.ZodBoolean>;
+   formatting: z.ZodOptional<z.ZodReadonly<z.ZodArray<z.ZodReadonly<z.ZodObject<{
+     effectName: z.ZodOptional<z.ZodString>;
+     length: z.ZodNumber;
+@@ -595,6 +598,9 @@
+   isDelayed: import("zod").ZodOptional<import("zod").ZodBoolean>;
+   sendErrorCode: import("zod").ZodOptional<import("zod").ZodNumber>;
+   nativeText: import("zod").ZodOptional<import("zod").ZodOptional<import("zod").ZodString>>;
++  nativeReplyTargetGuid: import("zod").ZodOptional<import("zod").ZodString>;
++  nativeThreadOriginatorGuid: import("zod").ZodOptional<import("zod").ZodString>;
++  nativeIsForward: import("zod").ZodOptional<import("zod").ZodBoolean>;
+   formatting: import("zod").ZodOptional<import("zod").ZodReadonly<import("zod").ZodArray<import("zod").ZodReadonly<import("zod").ZodObject<{
+     effectName: import("zod").ZodOptional<import("zod").ZodString>;
+     length: import("zod").ZodNumber;

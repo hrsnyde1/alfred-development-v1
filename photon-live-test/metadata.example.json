@@ -1,0 +1,17 @@
+{
+  "testAccountId": "TEST_ACCOUNT_ID",
+  "productionAccountId": "PRODUCTION_ACCOUNT_ID_NON_SECRET",
+  "testProjectId": "TEST_SPECTRUM_PROJECT_ID_ONLY",
+  "productionProjectId": "PRODUCTION_SPECTRUM_PROJECT_ID_NON_SECRET",
+  "testLineId": "TEST_LINE_ID_NON_SECRET",
+  "productionLineId": "PRODUCTION_LINE_ID_NON_SECRET",
+  "lineMode": "shared",
+  "testSenderId": "TEST_SENDER_ADDRESS_PRIVATE_METADATA_ONLY",
+  "productionSenderId": "PRODUCTION_SENDER_ADDRESS_PRIVATE_METADATA_ONLY",
+  "routingEvidence": {
+    "senderLinePairBoundToTestProject": false,
+    "productionProjectExcludedForPair": false,
+    "reviewer": "REVIEWER_IDENTIFIER",
+    "reference": "PRIVATE_PROVIDER_ROUTING_RECORD_REFERENCE"
+  }
+}

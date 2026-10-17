@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decision", "findings", "coverage"],
+  "properties": {
+    "decision": {"type": "string", "enum": ["APPROVED", "CHANGES_REQUESTED", "BLOCKED"]},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["severity", "requirement", "detail", "evidence"],
+        "properties": {
+          "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "info"]},
+          "requirement": {"type": "string"}, "detail": {"type": "string"},
+          "evidence": {"type": "string"}
+        }
+      }
+    },
+    "coverage": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["criterion", "result", "evidence"],
+        "properties": {
+          "criterion": {"type": "string"},
+          "result": {"type": "string", "enum": ["PASS", "FAIL", "BLOCKED"]},
+          "evidence": {"type": "string"}
+        }
+      }
+    }
+  }
+}

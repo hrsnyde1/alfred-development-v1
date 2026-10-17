@@ -1,0 +1,29 @@
+{
+  "attempt_mtime_ns": 1792181749323796085,
+  "canonical_spec_count": 1,
+  "canonical_spec_sha256": "2474942d42eef568c150fda9da76601fe4b3bcd946546a22ca9ec6eeeaf22f58",
+  "installed_planning_fix_sha256": {
+    "diagnostics.py": "c5862c14b39b22b7e6faef07aea1d4c32b5ab0df20aab987d4a0fed33b763e0e",
+    "handoffs.py": "4a0ee3c9efeb3a2ef23368d4359d5a23162cfdfd0e17ab1fa94d97df9e1bcb9c",
+    "host.py": "162d553df4512e235ba9a0a8ab8adb4187dde2a140c9c728c6e41c0958647954",
+    "protected.py": "573cc4c3032671eb8978997c07b5b34da4884a37c594117e608b671d2446233c",
+    "role.py": "99d43e22ace57b1cf4f97972e2e3755a8a2269d66f53f9078220b859407cd109"
+  },
+  "job_inventory": [
+    "job.json",
+    "plan.attempt.json"
+  ],
+  "job_sha256": "2a0ec905a71be607b2166639c742fcfdf2c7b420b62e9035be5746c4f71a84bc",
+  "local_planning_main_ref_present": false,
+  "matching_nested_approval_records": [],
+  "policy_ctime_ns": 1792181550744820182,
+  "policy_has_posix_acl": false,
+  "policy_private_since_before_attempt": true,
+  "preliminary_plan_sha256": "a9a900a7259aa8945b64e48d40228a0fee7ab5dcde2294cbd2db7589302a45ee",
+  "private_attempt_bytes_readable": false,
+  "production_changes": false,
+  "route_binds_owner_dm_confirmation": true,
+  "route_sha256": "f0311e1e5270ccdf37f15cacdec261911571fa388c60d2629f8776cdfb88fd8c",
+  "schema": "alfred.fresh-v1-recovery-read-only-evidence/1",
+  "unique_canonical_filing_count": 1
+}

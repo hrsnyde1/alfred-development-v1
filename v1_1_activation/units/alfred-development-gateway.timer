@@ -1,0 +1,11 @@
+[Unit]
+Description=Pick up confirmed V1 development requests automatically
+
+[Timer]
+OnBootSec=10s
+OnUnitInactiveSec=5s
+Unit=alfred-development-gateway.service
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

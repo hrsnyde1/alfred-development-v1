@@ -1,0 +1,22 @@
+{
+  "protocol": "alfred.devreq/1",
+  "request_id": "3f2b8c1e-4a5d-4e6f-9a7b-1c2d3e4f5a6b",
+  "revision": 1,
+  "submitted_at": "2026-10-07T09:30:00Z",
+  "origin": {"interface": "photon", "conversation_ref": "fixture-only"},
+  "utterance": "Plan a version endpoint in dev-001",
+  "project_hint": "dev-001",
+  "intent_confidence": 0.9,
+  "draft": {
+    "title": "Add a version endpoint",
+    "task_type": "feature",
+    "objective": "Expose the test version.",
+    "scope": "The isolated dev-001 fixture only.",
+    "requirements": "- Return the version as JSON.",
+    "constraints": "- No production changes.",
+    "acceptance_criteria": "- [ ] The test endpoint returns 200.",
+    "security_considerations": "No credentials.",
+    "testing_requirements": "Run a unit test."
+  },
+  "answers": []
+}

@@ -1,0 +1,11 @@
+{
+  "schema": "alfred.qa-config/1",
+  "model": {"provider": "codex", "model": "gpt-6.1-sol", "reasoning_effort": "medium", "enabled": true, "timeout_seconds": 120},
+  "projects": {
+    "dev-v1-accept": {"checks": ["calculator_examples", "python_unittest"], "criteria": [
+      {"contains": "add(7, 3)", "check": "calculator_examples"},
+      {"contains": "subtract(7, 3)", "check": "calculator_examples"},
+      {"contains": "unittest", "check": "python_unittest"}
+    ]}
+  }
+}

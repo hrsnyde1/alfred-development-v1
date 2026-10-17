@@ -1,0 +1,27 @@
+{
+  "schema": "alfred.developer-specialists/1",
+  "shared": {
+    "input": "verified canonical task, CTO plan digest, exact development grant, bounded assignment, repository baseline, selected model",
+    "output": "alfred.developer-report/1 with file hashes, checks, commit references and QA handoff",
+    "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"],
+    "execution": "one authorized isolated worktree per assignment; no host shell or network credential inheritance",
+    "handoff": "report completed to QA only after independent artifact inspection; blocked or failed returns to CTO",
+    "limits": ["no approval issuance or alteration", "no Gateway or credential writes", "no production writes", "no GitHub push, PR, merge or deployment", "no independent scope or model escalation"]
+  },
+  "specialists": {
+    "frontend": {"name": "Frontend Developer", "task_types": ["website", "ui", "dark_mode", "accessibility"], "responsibilities": "Browser UI, styles, accessibility, client behavior", "files": ["html", "css", "js", "jsx", "ts", "tsx", "vue", "svelte"], "deliverables": ["UI source", "component or browser checks"], "testing": ["interaction", "accessibility", "responsive behavior"]},
+    "backend": {"name": "Backend Developer", "task_types": ["api", "service", "database"], "responsibilities": "API, services and database changes through the shared database capability", "files": ["py", "go", "rs", "java", "sql"], "capabilities": ["database_engineering"], "deliverables": ["service source", "API or migration tests"], "testing": ["contract", "error cases", "migration rollback"]},
+    "full_stack": {"name": "Full-Stack Developer", "task_types": ["full_application", "cross_layer_feature"], "responsibilities": "Coherent UI and service feature when layers are tightly coupled", "files": ["html", "css", "js", "jsx", "ts", "tsx", "py", "go", "sql"], "deliverables": ["integrated feature", "end-to-end checks"], "testing": ["UI to API flow", "regression"]},
+    "devops": {"name": "DevOps Engineer", "task_types": ["deployment", "ci", "infrastructure"], "responsibilities": "Build, CI and deployment configuration; never execute deployment", "files": ["yaml", "yml", "toml", "dockerfile", "tf", "sh"], "deliverables": ["configuration change", "validation results"], "testing": ["configuration syntax", "dry run"]},
+    "data_engineer": {"name": "Data Engineer", "task_types": ["ingestion", "etl", "database"], "responsibilities": "Data pipelines, schemas and database engineering", "files": ["py", "sql", "yaml"], "capabilities": ["database_engineering"], "deliverables": ["pipeline source", "schema or data checks"], "testing": ["fixtures", "idempotence", "schema evolution"]},
+    "data_scientist": {"name": "Data Scientist", "task_types": ["forecasting", "analysis", "experiment"], "responsibilities": "Statistical analysis and reproducible modeling", "files": ["py", "r", "ipynb", "sql"], "deliverables": ["reproducible analysis", "metrics"], "testing": ["data splits", "baseline comparison", "reproducibility"]},
+    "ai_ml": {"name": "AI & ML Developer", "task_types": ["research_agent", "llm_pipeline", "ml_inference"], "responsibilities": "Model and agent pipeline implementation and evaluation", "files": ["py", "ts", "json", "yaml"], "deliverables": ["pipeline code", "evaluation results"], "testing": ["offline fixtures", "failure modes", "evals"]},
+    "integration": {"name": "Integration Engineer", "task_types": ["external_api", "webhook", "research_agent"], "responsibilities": "Service boundaries, adapters and retry behavior", "files": ["py", "ts", "json", "yaml"], "deliverables": ["adapter code", "contract tests"], "testing": ["mock provider", "timeouts", "retries"]},
+    "security": {"name": "Security Engineer", "task_types": ["auth", "authorization", "security"], "responsibilities": "Implement scoped security controls; independent security review remains separate", "files": ["py", "ts", "go", "rs", "yaml"], "deliverables": ["control code", "abuse-case tests"], "testing": ["deny paths", "privilege boundaries"]},
+    "mobile": {"name": "Mobile Developer", "task_types": ["ios", "android", "mobile"], "responsibilities": "Native and mobile client features", "files": ["swift", "kt", "java", "dart", "tsx"], "deliverables": ["mobile source", "device checks"], "testing": ["platform matrix", "permissions", "offline behavior"]},
+    "performance": {"name": "Performance Engineer", "task_types": ["latency", "throughput", "performance"], "responsibilities": "Profiling and measured optimization", "files": ["py", "ts", "go", "rs", "sql"], "deliverables": ["profile", "optimization", "before and after measurements"], "testing": ["repeatable benchmark", "regression threshold"]}
+  },
+  "capabilities": {
+    "database_engineering": {"responsibilities": "schema design, query behavior, migration safety", "tests": ["migration up and down", "transaction and index checks"], "limits": ["no production migration", "no live database credentials"]}
+  }
+}

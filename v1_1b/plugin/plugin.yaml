@@ -1,0 +1,10 @@
+name: alfred_development_gateway_intake
+version: 0.1.0
+description: Staged, single-project authenticated Gateway filing tool.
+author: Alfred Development
+kind: standalone
+platforms:
+  - linux
+provides_tools:
+  - development_gateway_submit
+  - development_gateway_status

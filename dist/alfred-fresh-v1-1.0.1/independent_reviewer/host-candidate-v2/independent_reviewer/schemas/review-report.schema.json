@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "alfred.review-report/1",
+  "type": "object",
+  "required": ["schema", "project", "task_id", "developer_commits", "final_revision", "baseline_revision", "qa_report_sha256", "reviewer_handoff_sha256", "files_inspected", "changed_file_hashes", "diff_sha256", "findings", "correctness", "scope", "acceptance_coverage", "model_used", "model_fallback", "decision", "input_fingerprint", "evidence", "next_authorized_stage"],
+  "properties": {
+    "schema": {"const": "alfred.review-report/1"},
+    "project": {"type": "string"}, "task_id": {"type": "string"},
+    "developer_commits": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{40}$"}},
+    "final_revision": {"type": ["string", "null"]}, "baseline_revision": {"type": ["string", "null"]},
+    "qa_report_sha256": {"type": ["string", "null"]}, "reviewer_handoff_sha256": {"type": ["string", "null"]},
+    "files_inspected": {"type": "array", "items": {"type": "string"}},
+    "changed_file_hashes": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+    "diff_sha256": {"type": ["string", "null"]},
+    "findings": {"type": "array", "items": {"type": "object", "required": ["severity", "requirement", "detail", "evidence"], "properties": {"severity": {"enum": ["critical", "high", "medium", "low", "info"]}, "requirement": {"type": "string"}, "detail": {"type": "string"}, "evidence": {"type": "string"}}, "additionalProperties": false}},
+    "correctness": {"type": "string"}, "scope": {"type": "string"},
+    "acceptance_coverage": {"type": "array", "items": {"type": "object", "required": ["criterion", "result", "evidence"], "properties": {"criterion": {"type": "string"}, "result": {"enum": ["PASS", "FAIL", "BLOCKED"]}, "evidence": {"type": "string"}}, "additionalProperties": false}},
+    "model_used": {"type": ["object", "null"]}, "model_fallback": {"type": ["string", "null"]},
+    "decision": {"enum": ["APPROVED", "CHANGES_REQUESTED", "BLOCKED"]},
+    "input_fingerprint": {"type": ["string", "null"]}, "evidence": {"type": "object"},
+    "next_authorized_stage": {"type": "string"}
+  }, "additionalProperties": false
+}

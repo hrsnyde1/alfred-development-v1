@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "alfred.github-draft-pr-authorization/1",
+  "type": "object",
+  "required": ["schema", "decision", "project", "task_id", "destination", "base_branch", "publication_branch", "final_revision", "publication_plan_sha256", "owner_event_id", "purpose"],
+  "properties": {
+    "schema": {"const": "alfred.github-draft-pr-authorization/1"},
+    "decision": {"const": "approved"},
+    "project": {"type": "string"}, "task_id": {"type": "string"},
+    "destination": {"type": "string"}, "base_branch": {"type": "string"},
+    "publication_branch": {"type": "string"},
+    "final_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "publication_plan_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "owner_event_id": {"type": "string", "minLength": 1},
+    "purpose": {"const": "one_github_draft_pr"}
+  },
+  "additionalProperties": false
+}

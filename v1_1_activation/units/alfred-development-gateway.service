@@ -1,0 +1,14 @@
+[Unit]
+Description=File confirmed V1 development requests with the existing Gateway
+ConditionPathIsDirectory=/home/alfred/Alfred/projects/hermes-requests/inbox
+
+[Service]
+Type=oneshot
+User=alfred
+Group=alfred
+WorkingDirectory=/home/alfred/Git/alfred
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/alfred/Git/alfred/.venv/bin/python -B /home/alfred/Git/alfred/.dev/bin/gateway.py run-once --intake-dir /home/alfred/Alfred/projects/hermes-requests
+UMask=0077
+NoNewPrivileges=yes
+

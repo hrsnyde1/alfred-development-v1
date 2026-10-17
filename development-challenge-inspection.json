@@ -1,0 +1,76 @@
+{
+  "approval_request": "PASS",
+  "baseline_revision": "596d91daf3311ad3aa0ee42e7220f699f58daf59",
+  "challenge_chars": 1226,
+  "context_sha256": "bda345a14ec110cf5b3118d7289204c304ba13795f9c9677351aa940d0ab198e",
+  "date_utc": "2026-10-16",
+  "delivery_state": "uncertain",
+  "gateway_evidence_idle_at_inspection": true,
+  "gateway_inputs": "PASS",
+  "gateway_pause_observed": false,
+  "historical_exception_available": false,
+  "historical_grant_tasks": [
+    "T-0002"
+  ],
+  "historical_grants": 2,
+  "http_timeout_seconds": 2,
+  "incident": {
+    "generic_refusal_utc": "2026-10-16 21:59:48.467371",
+    "intake_photon_incident_journal_entries": 0,
+    "mkdir_session_ended_utc": "2026-10-16 21:59:46.377368",
+    "subsequent_hold_utc": "2026-10-16 22:01:49.600151"
+  },
+  "intake": {
+    "grant_root_writable_in_unit": true,
+    "group": "alfred",
+    "main_pid": 439206,
+    "protect_home": "no",
+    "protect_system": "strict",
+    "source_sha256": "d3e1677cb8d7ee17ab801448e85db48fee12d88bbf21a3561e9e755eef742168",
+    "source_uid": 0,
+    "started_utc": "2026-10-16 19:28:35",
+    "uid": 1000
+  },
+  "issuer_invoked": false,
+  "live_socket_called": false,
+  "matching_task_records_in_grant_store": 0,
+  "messages_sent": 0,
+  "original_attempt_content": "operator-supplied; root-private bytes not independently readable by alfred",
+  "pending_development_approvals": 0,
+  "plan_bytes": 2875,
+  "plan_sha256": "e5b58519eb9943c7b9d093b19880c4a0c881dc5a2491c6e1c68b70ff10f032d6",
+  "project": "dev-v1-accept",
+  "protected_store_read": "PASS",
+  "read_only": true,
+  "receipt_size_calculation_bytes": 4158,
+  "recovery": "BLOCKED",
+  "schema": "alfred.development-challenge-inspection/1",
+  "scope": [
+    "calculator.py",
+    "test_calculator.py"
+  ],
+  "sidecar_port": 8789,
+  "spec_sha256": "2474942d42eef568c150fda9da76601fe4b3bcd946546a22ca9ec6eeeaf22f58",
+  "specialists": [
+    "backend"
+  ],
+  "task_filenames": [
+    "context.json",
+    "development-challenge.attempt.json",
+    "job.json",
+    "plan-recovery-1.attempt.json",
+    "plan-recovery-1.preliminary.json",
+    "plan-recovery-1.result.json",
+    "plan.attempt.json",
+    "plan.recovery.json",
+    "worker-policy.json"
+  ],
+  "task_id": "T-0003",
+  "worktree": {
+    "empty": true,
+    "is_directory": true,
+    "is_symlink": false,
+    "mode": "0700",
+    "uid": 1000
+  }
+}

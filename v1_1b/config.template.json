@@ -1,0 +1,10 @@
+{
+  "owner_sender_id": "REPLACE_WITH_VERIFIED_SDK_OWNER_SENDER_ID",
+  "sidecar_uid": 10001,
+  "hermes_uid": 10002,
+  "sidecar_port": 8789,
+  "sidecar_token": "REPLACE_WITH_EXISTING_SIDECAR_SHARED_TOKEN_IN_PROTECTED_CONFIG",
+  "intake_dir": "/home/alfred/Alfred/projects/hermes-requests",
+  "gateway_dir": "REPLACE_WITH_APPROVED_GATEWAY_JOURNAL_DIRECTORY",
+  "socket_path": "/run/alfred-development-intake/intake.sock"
+}

@@ -1,0 +1,25 @@
+{
+  "protocol": "alfred.devreq/1",
+  "request_id": "b6d51fb2-2586-4cd5-a5c2-e3578f273d20",
+  "revision": 1,
+  "submitted_at": "2026-10-15T05:00:00Z",
+  "origin": {
+    "interface": "operator_fixture",
+    "conversation_ref": "manual-acceptance-fixture-not-photon"
+  },
+  "utterance": "Operator-authorized acceptance fixture: add a backend subtract helper to the dev-v1-accept disposable calculator repository, changing only calculator.py.",
+  "project_hint": "dev-v1-accept",
+  "intent_confidence": 1.0,
+  "draft": {
+    "title": "Backend calculator subtract helper",
+    "task_type": "feature",
+    "objective": "Implement a backend subtract(a, b) helper in calculator.py that returns a minus b and makes the existing test_subtract pass.",
+    "scope": "Change only calculator.py in the disposable calculator repository.",
+    "requirements": "Keep add(a, b) working. Add subtract(a, b) using ordinary Python arithmetic. No new dependencies.",
+    "constraints": "One local code change only; no deployment, publication, or changes to other projects.",
+    "acceptance_criteria": "- [ ] add(7, 3) returns 10.\n- [ ] subtract(7, 3) returns 4.\n- [ ] The existing unittest discovery command passes.",
+    "security_considerations": "No external I/O, secrets, network access, or authority changes are needed.",
+    "testing_requirements": "Run /usr/bin/python3 -m unittest discover -v and record the result."
+  },
+  "answers": []
+}

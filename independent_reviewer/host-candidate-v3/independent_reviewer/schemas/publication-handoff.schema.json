@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "alfred.publication-handoff/1",
+  "type": "object",
+  "required": ["schema", "project", "task_id", "developer_commits", "final_revision", "changed_file_hashes", "qa_report_sha256", "review_report_sha256", "decision", "next_stage"],
+  "properties": {
+    "schema": {"const": "alfred.publication-handoff/1"}, "project": {"type": "string"},
+    "task_id": {"type": "string"}, "developer_commits": {"type": "array", "items": {"type": "string"}},
+    "final_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "changed_file_hashes": {"type": "object"},
+    "qa_report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "review_report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "decision": {"const": "APPROVED"}, "next_stage": {"const": "github_draft_pr_preparation"}
+  }, "additionalProperties": false
+}

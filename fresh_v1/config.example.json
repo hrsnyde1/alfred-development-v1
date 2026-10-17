@@ -1,0 +1,27 @@
+{
+  "schema": "alfred.fresh-v1-policy/1",
+  "enabled": false,
+  "project": "dev-v1-accept",
+  "destination": "hrsnyde1/alfred-dev-v1-acceptance",
+  "base_branch": "main",
+  "allowed_scope": [
+    "calculator.py",
+    "test_calculator.py"
+  ],
+  "specialists": [
+    "backend"
+  ],
+  "total_cost_limit": 6,
+  "gateway_root": "/home/alfred/Git/alfred",
+  "gateway_state": "/home/alfred/Alfred/gateway",
+  "registry": "/home/alfred/Git/alfred/registry/projects.yaml",
+  "grant_root": "/var/lib/alfred-development-grants",
+  "developer_state": "/var/lib/alfred-development-state",
+  "models": "/var/lib/alfred-development-state/models.json",
+  "worktree_root": "/var/lib/alfred-development-worktrees",
+  "jobs": "/var/lib/alfred-v1-handoffs",
+  "intake_socket": "/run/alfred-development-intake/intake.sock",
+  "completion_state": "/home/alfred/Alfred/completion-delivery",
+  "publisher_token": "/var/lib/alfred-draft-pr-private/github-token",
+  "repository": "/home/alfred/alfred-development-lab/milestone2/task-a/live-acceptance/repo"
+}

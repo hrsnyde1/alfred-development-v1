@@ -1,0 +1,575 @@
+--- a/gateway/session_context.py
++++ b/gateway/session_context.py
+@@ -5,6 +5,8 @@
+ other's routing ids.  ``get_session_env`` is a drop-in for ``os.getenv``.
+ """
+ 
++import hashlib
++import hmac
+ import os
+ from contextlib import contextmanager
+ from contextvars import ContextVar
+@@ -55,6 +57,62 @@
+ # Request-local proof that the client resumes SessionDB history. No env fallback
+ # or child-process export: a bound id alone cannot authorize detached delivery.
+ _SESSION_HISTORY_DELIVERY = ContextVar("HERMES_SESSION_HISTORY_DELIVERY", default=_UNSET)
++_DEVELOPMENT_ORIGIN = ContextVar("HERMES_DEVELOPMENT_ORIGIN", default=None)
++
++
++class _DevelopmentOriginLease:
++    __slots__ = ("value", "active")
++
++    def __init__(self, value: dict):
++        self.value = value
++        self.active = True
++
++
++@contextmanager
++def bound_development_origin(origin: dict | None):
++    """Switch the claim for an in-band queued turn and revoke the old claim."""
++    previous = _DEVELOPMENT_ORIGIN.get()
++    if isinstance(previous, _DevelopmentOriginLease):
++        previous.active = False
++    current = _DevelopmentOriginLease(origin) if isinstance(origin, dict) else None
++    token = _DEVELOPMENT_ORIGIN.set(current)
++    try:
++        yield
++    finally:
++        if current is not None:
++            current.active = False
++        _DEVELOPMENT_ORIGIN.reset(token)
++
++
++def admitted_development_origin(source: Any, event: Any, session_key: str) -> dict | None:
++    """Bind only the original Photon event to this processing turn, never model input."""
++    platform = getattr(getattr(source, "platform", None), "value", None)
++    raw = getattr(event, "raw_message", None)
++    if (platform != "photon" or getattr(source, "profile", None) not in (None, "default")
++            or getattr(source, "profile_route_rejected", False)
++            or getattr(event, "internal", False) or not isinstance(raw, dict)):
++        return None
++    sender = raw.get("sender")
++    sender_id = sender.get("id") if isinstance(sender, dict) else None
++    message_id = raw.get("messageId")
++    content = raw.get("content")
++    if isinstance(content, dict) and content.get("type") == "reply":
++        content = content.get("content")
++    text = content.get("text") if isinstance(content, dict) and content.get("type") == "text" else None
++    if (raw.get("direction") != "inbound"
++            or not isinstance(sender_id, str) or not sender_id
++            or not isinstance(message_id, str) or not message_id
++            or not isinstance(text, str)
++            or not hmac.compare_digest(sender_id, str(getattr(source, "user_id", "")))
++            or message_id != getattr(source, "message_id", None)):
++        return None
++    return {"event_id": message_id, "text_digest": hashlib.sha256(text.encode()).hexdigest(),
++            "session_key": session_key}
++
++
++def development_intake_origin() -> dict | None:
++    value = _DEVELOPMENT_ORIGIN.get()
++    return dict(value.value) if isinstance(value, _DevelopmentOriginLease) and value.active else None
+ 
+ # Cron auto-delivery vars, set per-job in run_job() so concurrent jobs don't clobber.
+ _CRON_AUTO_DELIVER_PLATFORM = ContextVar("HERMES_CRON_AUTO_DELIVER_PLATFORM", default=_UNSET)
+@@ -120,6 +178,7 @@
+     browser_control_transport_family: str = "", cwd: str = "", async_delivery: bool = True,
+     ui_session_id: str = "", cron_session: Any = _UNSET, parent_chat_id: str = "",
+     session_history_delivery: str | None = None,
++    development_origin: dict | None = None,
+ ) -> list:
+     """Set all session context variables and return reset tokens.  Call
+     ``clear_session_vars(tokens)`` in a ``finally``; not nestable, clearing resets every var
+@@ -140,6 +199,8 @@
+     tokens = [var.set(value) for var, value in zip(_SESSION_VARS, values)]
+     tokens.append(_SESSION_ASYNC_DELIVERY.set(bool(async_delivery)))
+     tokens.append(_SESSION_HISTORY_DELIVERY.set(_UNSET if session_history_delivery is None else session_history_delivery))
++    tokens.append(_DEVELOPMENT_ORIGIN.set(
++        _DevelopmentOriginLease(development_origin) if isinstance(development_origin, dict) else None))
+     _runtime_cwd("set_session_cwd", cwd)
+     return tokens
+ 
+@@ -154,6 +215,10 @@
+         var.set("")
+     _SESSION_ASYNC_DELIVERY.set(_UNSET)
+     _SESSION_HISTORY_DELIVERY.set(_UNSET)
++    claim = _DEVELOPMENT_ORIGIN.get()
++    if isinstance(claim, _DevelopmentOriginLease):
++        claim.active = False
++    _DEVELOPMENT_ORIGIN.set(None)
+     _runtime_cwd("clear_session_cwd")
+ 
+ 
+@@ -167,6 +232,7 @@
+         var.set(_UNSET)
+     _SESSION_ASYNC_DELIVERY.set(_UNSET)
+     _SESSION_HISTORY_DELIVERY.set(_UNSET)
++    _DEVELOPMENT_ORIGIN.set(None)
+     _runtime_cwd("clear_session_cwd")
+ 
+ 
+--- a/gateway/run.py
++++ b/gateway/run.py
+@@ -4201,15 +4201,16 @@
+         Platform.FEISHU, Platform.WECOM, Platform.WECOM_CALLBACK, Platform.WEIXIN, Platform.BLUEBUBBLES, Platform.QQBOT, Platform.LOCAL,
+     })
+ 
+-    def _set_session_env(self, context: SessionContext) -> list:
++    def _set_session_env(self, context: SessionContext, event=None) -> list:
+         """Set session context variables (contextvars, not os.environ, so concurrent messages can't
+         overwrite each other). Returns reset tokens for ``_clear_session_env`` in a ``finally``."""
+-        from gateway.session_context import set_session_vars
++        from gateway.session_context import admitted_development_origin, set_session_vars
+         # Async-delivery capability tells async tools whether this channel can wake a later turn. Default
+         # True keeps CLI/unknown paths working; stateless adapters (api_server) declare False.
+         _adapter = (getattr(self, "adapters", None) or {}).get(context.source.platform)
+         _async_delivery = getattr(_adapter, "supports_async_delivery", True)
+         return set_session_vars(
++            development_origin=admitted_development_origin(context.source, event, context.session_key),
+             platform=context.source.platform.value,
+             chat_id=context.source.chat_id,
+             chat_type=str(context.source.chat_type) if context.source.chat_type else "",
+--- a/gateway/run_turn.py
++++ b/gateway/run_turn.py
+@@ -2054,7 +2054,7 @@
+         restore_session_yolo(session_key, session_entry.yolo is True)  # a restarted gateway's set starts empty
+         context = build_session_context(source, self.config, session_entry)
+         # Session context variables for tools (task-local, concurrency-safe)
+-        _session_env_tokens = self._set_session_env(context)
++        _session_env_tokens = self._set_session_env(context, event)
+         # Self-injected turns (internal=True) persist with a DB-only display_kind: timeline notices, not user bubbles.
+         persist_user_display_kind = display_kind_for_event(event)
+         _redact_pii = False  # privacy.redact_pii, re-read per message
+@@ -3935,18 +3935,21 @@
+         try:
+             await self._refresh_agent_cache_message_count(session_key, session_id)
+ 
+-            followup_result = await self._run_agent(
+-                message=next_message, context_prompt=turn_ctx.context_prompt, history=updated_history,
+-                source=next_source, session_id=session_id, session_key=next_session_key,
+-                run_generation=run_generation, _interrupt_depth=_interrupt_depth + 1,
+-                event_message_id=next_message_id, inbound_message_id=next_inbound_id,
+-                channel_prompt=next_channel_prompt, message_type=next_message_type,
+-                persist_user_message=next_persist_message,
+-                persist_user_display_kind=next_display_kind,
+-                reply_expected=next_reply_expected,
+-                persist_user_display_metadata={
+-                    **reply_expected_metadata(next_reply_expected), **diagnostic_metadata(pending_event)} or None,
+-            )
++            from gateway.session_context import admitted_development_origin, bound_development_origin
++            followup_origin = admitted_development_origin(next_source, pending_event, next_session_key)
++            with bound_development_origin(followup_origin):
++                followup_result = await self._run_agent(
++                    message=next_message, context_prompt=turn_ctx.context_prompt, history=updated_history,
++                    source=next_source, session_id=session_id, session_key=next_session_key,
++                    run_generation=run_generation, _interrupt_depth=_interrupt_depth + 1,
++                    event_message_id=next_message_id, inbound_message_id=next_inbound_id,
++                    channel_prompt=next_channel_prompt, message_type=next_message_type,
++                    persist_user_message=next_persist_message,
++                    persist_user_display_kind=next_display_kind,
++                    reply_expected=next_reply_expected,
++                    persist_user_display_metadata={
++                        **reply_expected_metadata(next_reply_expected), **diagnostic_metadata(pending_event)} or None,
++                )
+         except asyncio.CancelledError:
+             await _run_followup_processing_hook(
+                 _hook_adapter, pending_event, "on_processing_complete", _followup_cancel_outcome(_hook_adapter))
+--- a/plugins/platforms/photon/adapter.py
++++ b/plugins/platforms/photon/adapter.py
+@@ -15,9 +15,11 @@
+ import re
+ import secrets
+ import signal
++import stat
+ import subprocess
+ import sys
+ import time
++import uuid
+ from datetime import datetime, timezone, UTC
+ from pathlib import Path
+ from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Dict, List, Optional, Tuple
+@@ -55,6 +57,62 @@
+ import contextlib
+ 
+ logger = logging.getLogger(__name__)
++
++_RESTRICTED_MEDIA_MAX_BYTES = 64 * 1024 * 1024
++
++
++def _spool_restricted_media(path: str) -> tuple[int, str]:
++    """Copy approved Hermes media to the one directory visible to the protected sidecar."""
++    root = _get_scoped_secret("PHOTON_HERMES_MEDIA_SPOOL") or ""
++    if not root or not os.path.isabs(root):
++        raise ValueError("restricted Photon media spool is unavailable")
++    directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
++    media_id = uuid.uuid4().hex
++    temporary = f".{media_id}.tmp"
++    try:
++        source = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
++        try:
++            info = os.fstat(source)
++            if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= _RESTRICTED_MEDIA_MAX_BYTES:
++                raise ValueError("unsupported Photon media file")
++            target = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
++                             0o640, dir_fd=directory)
++            try:
++                os.fchmod(target, 0o640)
++                remaining = info.st_size
++                while remaining:
++                    chunk = os.read(source, min(1024 * 1024, remaining))
++                    if not chunk:
++                        raise ValueError("Photon media changed during staging")
++                    view = memoryview(chunk)
++                    while view:
++                        view = view[os.write(target, view):]
++                    remaining -= len(chunk)
++                os.fsync(target)
++            finally:
++                os.close(target)
++            os.rename(temporary, media_id, src_dir_fd=directory, dst_dir_fd=directory)
++            os.fsync(directory)
++        finally:
++            os.close(source)
++        return directory, media_id
++    except BaseException:
++        for entry in (temporary, media_id):
++            try:
++                os.unlink(entry, dir_fd=directory)
++            except FileNotFoundError:
++                pass
++        os.close(directory)
++        raise
++
++
++def _discard_restricted_media(directory: int, media_id: str) -> None:
++    try:
++        os.unlink(media_id, dir_fd=directory)
++    except FileNotFoundError:
++        pass
++    finally:
++        os.close(directory)
+ 
+ _DEFAULT_SIDECAR_PORT = 8789
+ _DEFAULT_SIDECAR_BIND = "127.0.0.1"
+@@ -564,18 +622,21 @@
+     def __init__(self, config: PlatformConfig):
+         super().__init__(config, Platform("photon"))
+         extra = config.extra or {}
+-        # Project credentials: env wins, then config.extra, then auth.json.
+-        stored_id, stored_sec = load_project_credentials()
+-        self._project_id: str = _get_scoped_secret("PHOTON_PROJECT_ID") or extra.get("project_id") or stored_id or ""
+-        self._project_secret: str = (
++        # In protected external mode the existing sidecar owns the one Photon
++        # connection. Hermes must neither load nor receive project credentials.
++        self._external_sidecar = str(_get_scoped_secret("PHOTON_SIDECAR_EXTERNAL", "false")).lower() in ("1", "true", "yes")
++        stored_id, stored_sec = ("", "") if self._external_sidecar else load_project_credentials()
++        self._project_id: str = "" if self._external_sidecar else (_get_scoped_secret("PHOTON_PROJECT_ID") or extra.get("project_id") or stored_id or "")
++        self._project_secret: str = "" if self._external_sidecar else (
+             _get_scoped_secret("PHOTON_PROJECT_SECRET") or extra.get("project_secret") or stored_sec or "")
+         self._sidecar_port = _coerce_port(
+             extra.get("sidecar_port") or _get_scoped_secret("PHOTON_SIDECAR_PORT"), _DEFAULT_SIDECAR_PORT)
+         self._sidecar_bind = _DEFAULT_SIDECAR_BIND
+-        self._sidecar_token = _get_scoped_secret("PHOTON_SIDECAR_TOKEN") or secrets.token_hex(16)
++        configured_token = _get_scoped_secret("PHOTON_SIDECAR_TOKEN")
++        self._sidecar_token = configured_token or ("" if self._external_sidecar else secrets.token_hex(16))
+         autostart = str(_get_scoped_secret("PHOTON_SIDECAR_AUTOSTART", "true")).lower()
+-        self._autostart_sidecar = autostart not in ("0", "false", "no")
+-        self._node_bin = _get_scoped_secret("PHOTON_NODE_BIN") or find_node_executable("node")
++        self._autostart_sidecar = not self._external_sidecar and autostart not in ("0", "false", "no")
++        self._node_bin = "" if self._external_sidecar else (_get_scoped_secret("PHOTON_NODE_BIN") or find_node_executable("node"))
+         # Presence watchdog (second layer behind the sidecar's own zombie-stream detection):
+         # respawns only when the sidecar's HTTP loop hangs; 10-min interval because shared
+         # lines are quiet for hours. Config key wins, then env; None-aware so 0 disables it.
+@@ -647,7 +708,10 @@
+         if not HTTPX_AVAILABLE:
+             self._set_fatal_error("MISSING_DEP", "httpx not installed", retryable=False)
+             return False
+-        if not self._project_id or not self._project_secret:
++        if self._external_sidecar and not self._sidecar_token:
++            self._set_fatal_error("MISSING_SIDECAR_TOKEN", "external Photon sidecar token is required", retryable=False)
++            return False
++        if not self._external_sidecar and (not self._project_id or not self._project_secret):
+             self._set_fatal_error(
+                 "MISSING_CREDENTIALS",
+                 "PHOTON_PROJECT_ID and PHOTON_PROJECT_SECRET are required. Run: hermes photon setup",
+@@ -669,6 +733,14 @@
+                 await client.aclose()
+                 self._http_client = None
+                 return False
++        elif self._external_sidecar:
++            try:
++                await self._sidecar_call("/healthz", {})
++            except Exception as exc:
++                self._set_fatal_error("SIDECAR_UNAVAILABLE", f"external Photon sidecar unavailable: {exc}", retryable=True)
++                await client.aclose()
++                self._http_client = None
++                return False
+         else:
+             logger.warning("[photon] sidecar autostart disabled — inbound + outbound will fail")
+         loop = asyncio.get_event_loop()
+@@ -697,7 +769,8 @@
+             if fffc_task and not fffc_task.done():
+                 fffc_task.cancel()
+         self._pending_fffc.clear()
+-        await self._stop_sidecar()
++        if not self._external_sidecar:
++            await self._stop_sidecar()
+         if self._http_client is not None:
+             with contextlib.suppress(Exception):
+                 await self._http_client.aclose()
+@@ -1522,6 +1595,18 @@
+         body = _attachment_body(
+             space_id, safe_path, kind=kind, name=name, mime_type=mime_type or _guess_mime(safe_path), caption=caption)
+         label = caption or _attachment_label(kind, name or os.path.basename(safe_path))
++        if self._external_sidecar:
++            try:
++                directory, media_id = await asyncio.to_thread(_spool_restricted_media, safe_path)
++            except (OSError, ValueError) as exc:
++                return SendResult(success=False, error=str(exc))
++            try:
++                body.pop("path")
++                body["attachmentId"] = media_id
++                body["name"] = name or os.path.basename(safe_path)
++                return await self._post_send("/send-media", body, structured=True, sent_text=label)
++            finally:
++                await asyncio.to_thread(_discard_restricted_media, directory, media_id)
+         return await self._post_send("/send-attachment", body, structured=True, sent_text=label)
+ 
+     async def _sidecar_call(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+@@ -1679,7 +1764,17 @@
+                     continue
+                 att_body = _attachment_body(
+                     chat_id, safe_path, kind="voice" if is_voice else "attachment", mime_type=_guess_mime(safe_path))
+-                resp, data = await _post("/send-attachment", att_body)
++                if str(_get_scoped_secret("PHOTON_SIDECAR_EXTERNAL", "false")).lower() in ("1", "true", "yes"):
++                    directory, media_id = await asyncio.to_thread(_spool_restricted_media, safe_path)
++                    try:
++                        att_body.pop("path")
++                        att_body["attachmentId"] = media_id
++                        att_body["name"] = os.path.basename(safe_path)
++                        resp, data = await _post("/send-media", att_body)
++                    finally:
++                        await asyncio.to_thread(_discard_restricted_media, directory, media_id)
++                else:
++                    resp, data = await _post("/send-attachment", att_body)
+                 if not data:
+                     return _standalone_error(resp)
+                 last_message_id = data.get("messageId") or last_message_id
+--- a/plugins/platforms/photon/sidecar/index.mjs
++++ b/plugins/platforms/photon/sidecar/index.mjs
+@@ -65,6 +65,8 @@
+ import http from "node:http";
+ import crypto from "node:crypto";
+ import { once } from "node:events";
++import { observeDevelopmentEvent } from "./development-observe.mjs";
++import { readRestrictedMedia } from "./restricted-media.mjs";
+ import { patchSpectrumTs } from "./patch-spectrum-mixed-attachments.mjs";
+ import { chooseSendFormat } from "./send-format.mjs";
+ import {
+@@ -79,6 +81,16 @@
+ const port = parseInt(process.env.PHOTON_SIDECAR_PORT || "8789", 10);
+ const bind = process.env.PHOTON_SIDECAR_BIND || "127.0.0.1";
+ const sharedToken = process.env.PHOTON_SIDECAR_TOKEN;
++const developmentObserverSocket = process.env.PHOTON_DEVELOPMENT_OBSERVER_SOCKET || "";
++const controlToken = process.env.PHOTON_CONTROL_TOKEN || "";
++const restrictedMediaRoot = process.env.PHOTON_HERMES_MEDIA_SPOOL || "";
++const hermesUid = Number(process.env.PHOTON_HERMES_UID);
++if (developmentObserverSocket && (!controlToken || controlToken === sharedToken)) {
++  throw new Error("protected development observation needs a separate control token");
++}
++if (developmentObserverSocket && (!restrictedMediaRoot || !Number.isSafeInteger(hermesUid) || hermesUid <= 0)) {
++  throw new Error("protected development observation needs a restricted media spool and Hermes UID");
++}
+ const telemetry = /^(1|true|yes|on)$/i.test(
+   (process.env.PHOTON_TELEMETRY || "").trim()
+ );
+@@ -645,14 +657,20 @@
+     const ts = message.timestamp;
+     return {
+       messageId: message.id ?? null,
++      direction: message.direction ?? null,
+       platform: message.platform || space.__platform || "iMessage",
+       space: {
+         id: space.id ?? msgSpace.id ?? null,
+         // iMessage spaces carry `type` ("dm"|"group") and `phone` directly.
+-        type: space.type ?? msgSpace.type ?? "dm",
++        type: space.type ?? msgSpace.type ?? null,
+         phone: space.phone ?? msgSpace.phone ?? null,
+       },
+       sender: { id: message.sender ? message.sender.id : null },
++      // These fields come from the pinned Spectrum native-message patch.
++      // Never derive authorization from reply.content.target or thread fallback.
++      nativeReplyTargetGuid: message.nativeReplyTargetGuid ?? null,
++      nativeThreadOriginatorGuid: message.nativeThreadOriginatorGuid ?? null,
++      nativeIsForward: message.nativeIsForward ?? null,
+       content: await normalizeContent(message.content),
+       timestamp:
+         ts instanceof Date ? ts.toISOString() : ts ? String(ts) : null,
+@@ -711,6 +729,10 @@
+         rememberKnownMessage(message);
+         const event = await normalizeEvent(space, message);
+         if (!event) continue;
++        // Observe the original SDK sender before Hermes receives the same
++        // ordinary message. Failure leaves development intake unavailable;
++        // it does not interrupt the existing conversation stream.
++        await observeDevelopmentEvent(developmentObserverSocket, event);
+         await deliver(JSON.stringify(event));
+         await acknowledgeInboundRead(message);
+       }
+@@ -1011,6 +1033,13 @@
+   return h.length === _tokenBuf.length && crypto.timingSafeEqual(h, _tokenBuf);
+ }
+ 
++function controlTokenOk(header) {
++  if (!developmentObserverSocket || typeof header !== "string") return false;
++  const expected = Buffer.from(controlToken);
++  const actual = Buffer.from(header);
++  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
++}
++
+ function isHttpUrl(value) {
+   if (typeof value !== "string" || !value.trim()) return false;
+   try {
+@@ -1059,6 +1088,9 @@
+       );
+     }
+     if (req.url === "/shutdown") {
++      if (developmentObserverSocket && !controlTokenOk(req.headers["x-photon-control-token"])) {
++        return unauthorized(res);
++      }
+       ok(res, {});
+       setTimeout(() => process.kill(process.pid, "SIGTERM"), 50);
+       return;
+@@ -1098,6 +1130,9 @@
+       return ok(res, { messageId: result?.id || null });
+     }
+     if (req.url === "/send-attachment") {
++      if (developmentObserverSocket && !controlTokenOk(req.headers["x-photon-control-token"])) {
++        return unauthorized(res);
++      }
+       const { spaceId, path, name, mimeType, caption, kind } =
+         body || {};
+       if (!spaceId || typeof path !== "string" || !path) {
+@@ -1128,6 +1163,31 @@
+             "photon-sidecar: attachment sent but caption failed: " +
+               (e && e.stack ? e.stack : String(e))
+           );
++        }
++      }
++      return ok(res, { messageId: result?.id || null });
++    }
++    if (req.url === "/send-media") {
++      if (!developmentObserverSocket) return badRequest(res, "restricted media is unavailable");
++      const { spaceId, attachmentId, name, mimeType, caption, kind } = body || {};
++      if (!spaceId || typeof attachmentId !== "string") {
++        return badRequest(res, "spaceId and attachmentId are required");
++      }
++      const bytes = await readRestrictedMedia(restrictedMediaRoot, attachmentId, hermesUid);
++      const space = await resolveSpace(spaceId);
++      const opts = {};
++      if (name) opts.name = name;
++      if (mimeType) opts.mimeType = mimeType;
++      const builder = kind === "voice"
++        ? voice(bytes, Object.keys(opts).length ? opts : undefined)
++        : attachment(bytes, Object.keys(opts).length ? opts : undefined);
++      const result = await space.send(builder);
++      if (caption && typeof caption === "string") {
++        try {
++          await space.send(spectrumText(caption));
++        } catch (e) {
++          console.error("photon-sidecar: attachment sent but caption failed: " +
++            (e && e.stack ? e.stack : String(e)));
+         }
+       }
+       return ok(res, { messageId: result?.id || null });
+--- a/plugins/platforms/photon/sidecar/development-observe.mjs
++++ b/plugins/platforms/photon/sidecar/development-observe.mjs
+@@ -0,0 +1,53 @@
++// A bounded observation from the existing authenticated SDK stream. No second
++// Photon connection and no model-controlled endpoint or destination.
++import net from "node:net";
++
++export function developmentObservation(event) {
++  const content = event?.content?.type === "reply" ? event.content.content : event?.content;
++  if (!event || content?.type !== "text") return null;
++  return {
++    messageId: event.messageId,
++    direction: event.direction ?? null,
++    sender: { id: event.sender?.id ?? null },
++    space: { id: event.space?.id ?? null, type: event.space?.type ?? null },
++    nativeReplyTargetGuid: event.nativeReplyTargetGuid ?? null,
++    nativeThreadOriginatorGuid: event.nativeThreadOriginatorGuid ?? null,
++    nativeIsForward: event.nativeIsForward ?? null,
++    content: { type: "text", text: content.text },
++    timestamp: event.timestamp,
++  };
++}
++
++export async function observeDevelopmentEvent(socketPath, event) {
++  const observation = developmentObservation(event);
++  if (!socketPath || !observation) return { state: "not_applicable" };
++  const body = JSON.stringify({ op: "observe", event: observation });
++  if (Buffer.byteLength(body) > 64 * 1024) return { state: "unavailable" };
++  return await new Promise((resolve) => {
++    const client = net.createConnection({ path: socketPath });
++    let settled = false;
++    let answer = "";
++    const finish = (value) => {
++      if (settled) return;
++      settled = true;
++      client.destroy();
++      resolve(value);
++    };
++    // A preview send holds the single pending gate briefly; keep an inbound
++    // reply queued long enough for the bounded 2s send to finish.
++    client.setTimeout(2500, () => finish({ state: "unavailable" }));
++    client.on("error", () => finish({ state: "unavailable" }));
++    client.on("connect", () => client.write(body + "\n"));
++    client.on("data", (chunk) => {
++      answer += chunk.toString("utf8");
++      if (answer.length > 1024) return finish({ state: "unavailable" });
++      if (!answer.includes("\n")) return;
++      try {
++        const result = JSON.parse(answer.split("\n", 1)[0]);
++        finish(result?.ok === true ? { state: result.state } : { state: "unavailable" });
++      } catch {
++        finish({ state: "unavailable" });
++      }
++    });
++  });
++}
+--- a/plugins/platforms/photon/sidecar/restricted-media.mjs
++++ b/plugins/platforms/photon/sidecar/restricted-media.mjs
+@@ -0,0 +1,32 @@
++// The restricted Hermes token may send bytes already staged in this one spool.
++// It never supplies a broker-side path or gains the protected control token.
++import { constants } from "node:fs";
++import { open } from "node:fs/promises";
++import { join, isAbsolute } from "node:path";
++
++export const MAX_RESTRICTED_MEDIA_BYTES = 64 * 1024 * 1024;
++
++export async function readRestrictedMedia(root, id, hermesUid) {
++  if (!isAbsolute(root) || !/^[a-f0-9]{32}$/.test(id)
++      || !Number.isSafeInteger(hermesUid) || hermesUid <= 0) {
++    throw new Error("invalid restricted media request");
++  }
++  const parent = await open(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
++  try {
++    const file = await open(join(root, id), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
++    try {
++      const info = await file.stat();
++      if (!info.isFile() || info.nlink !== 1 || info.uid !== hermesUid
++          || info.size < 1 || info.size > MAX_RESTRICTED_MEDIA_BYTES) {
++        throw new Error("restricted media denied");
++      }
++      const bytes = await file.readFile();
++      if (bytes.length !== info.size) throw new Error("restricted media changed while reading");
++      return bytes;
++    } finally {
++      await file.close();
++    }
++  } finally {
++    await parent.close();
++  }
++}

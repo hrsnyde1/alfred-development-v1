@@ -1,0 +1,20 @@
+{
+  "schema": "alfred.completion-config/1",
+  "enabled": false,
+  "binding": {
+    "project": "dev-v1-accept",
+    "task_id": "T-0002",
+    "destination": "hrsnyde1/alfred-dev-v1-acceptance",
+    "base_branch": "main",
+    "publication_branch": "alfred/dev-v1-accept/T-0002-89ba188f8a2f",
+    "final_revision": "89ba188f8a2f801d433a30c9c21363efb3e1043d"
+  },
+  "publication-plan-sha256": "511fa533fd9dc5bb41d51bff1baa21b28a54b8b0b670e5b3f0f602a78d38b903",
+  "publication-result-sha256": null,
+  "owner-authorization-sha256": null,
+  "owner_sender_id": null,
+  "owner_space_id": null,
+  "owner_github_login": "hrsnyde1",
+  "owner_merge_attested": false,
+  "state_directory": "/home/alfred/Alfred/completion-delivery"
+}

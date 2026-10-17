@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "alfred.qa-report/1",
+  "type": "object",
+  "required": ["schema", "project", "task_id", "decision", "developer_commits", "final_revision", "baseline_revision", "files_inspected", "changed_file_hashes", "tests", "acceptance_criteria", "findings", "qa_model", "evidence", "next_authorized_action"],
+  "properties": {
+    "schema": {"const": "alfred.qa-report/1"},
+    "project": {"type": "string"},
+    "task_id": {"type": "string"},
+    "decision": {"enum": ["PASS", "FAIL", "BLOCKED"]},
+    "developer_commits": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{40}$"}},
+    "final_revision": {"type": ["string", "null"]},
+    "baseline_revision": {"type": ["string", "null"]},
+    "files_inspected": {"type": "array", "items": {"type": "string"}},
+    "changed_file_hashes": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+    "tests": {"type": "array", "items": {"type": "object", "required": ["id", "command", "exit_code", "result", "output"], "properties": {"id": {"type": "string"}, "command": {"type": "array", "items": {"type": "string"}}, "exit_code": {"type": ["integer", "null"]}, "result": {"enum": ["PASS", "FAIL", "BLOCKED"]}, "output": {"type": "string"}}, "additionalProperties": false}},
+    "acceptance_criteria": {"type": "array", "items": {"type": "object", "required": ["criterion", "result", "evidence"], "properties": {"criterion": {"type": "string"}, "result": {"enum": ["PASS", "FAIL", "BLOCKED"]}, "evidence": {"type": "string"}}, "additionalProperties": false}},
+    "findings": {"type": "array", "items": {"type": "object", "required": ["severity", "requirement", "detail"], "properties": {"severity": {"enum": ["critical", "high", "medium", "low", "info"]}, "requirement": {"type": "string"}, "detail": {"type": "string"}}, "additionalProperties": false}},
+    "qa_model": {"type": ["object", "null"]},
+    "evidence": {"type": "object"},
+    "next_authorized_action": {"type": "string"}
+  },
+  "additionalProperties": false
+}

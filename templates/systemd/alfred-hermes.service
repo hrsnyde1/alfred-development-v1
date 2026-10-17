@@ -1,0 +1,44 @@
+# CANDIDATE ONLY. Requires independent Task A security acceptance and deployment approval.
+[Unit]
+Description=Isolated Alfred Hermes gateway candidate
+After=network-online.target
+Wants=network-online.target
+Conflicts=hermes-gateway.service
+
+[Service]
+Type=simple
+User=alfredhermes
+Group=alfredhermes
+SupplementaryGroups=alfredevidencero
+WorkingDirectory=/opt/alfred-hermes/agent
+Environment=HERMES_HOME=/var/lib/alfred-hermes/.hermes
+Environment=HERMES_SUPERVISED_CHILD=1
+Environment=PHOTON_TASK_A_BROKER_SOCKET=/run/alfred-photon-intake/hermes.sock
+UnsetEnvironment=PHOTON_PROJECT_ID PHOTON_PROJECT_SECRET PHOTON_SIDECAR_TOKEN
+ExecStart=/opt/alfred-hermes/agent/.hermes/bin/hermes gateway run
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+ProtectProc=invisible
+LockPersonality=yes
+ReadWritePaths=/var/lib/alfred-hermes/.hermes
+BindReadOnlyPaths=/opt/alfred-hermes/plugins/alfred_development_status:/var/lib/alfred-hermes/.hermes/plugins/alfred_development_status
+InaccessiblePaths=-/run/user/1000 -/run/docker.sock -/var/snap/lxd/common/lxd/unix.socket
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=70
+
+[Install]
+WantedBy=multi-user.target

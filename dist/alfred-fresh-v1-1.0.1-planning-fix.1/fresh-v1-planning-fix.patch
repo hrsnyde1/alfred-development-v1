@@ -1,0 +1,390 @@
+--- a/fresh_v1/host.py
++++ b/fresh_v1/host.py
+@@ -17,6 +17,7 @@
+ import tempfile
+ from pathlib import Path
+ 
++from .diagnostics import WorkerFailure, failure, worker_failure
+ from .handoffs import Held, advance, write_once
+ from .protected import identity, protected_json
+ 
+@@ -145,6 +146,15 @@
+ 
+     def worker(self, job, stage, user):
+         self.guard()
++        # The canonical policy stays root:root 0600. Supply a separately sealed
++        # job input, like job.json, instead of asking a dropped UID to read it.
++        policy_path = self.jobdir(job) / "worker-policy.json"
++        if policy_path.exists():
++            frozen, _ = protected_json(policy_path)
++            if frozen != self.p:
++                raise Held("worker policy differs from current protected policy")
++        else:
++            self.freeze_json(policy_path, self.p, USERS)
+         # Root-owned library roots only. Publisher's original flat release is
+         # imported under its existing package name without copying its worker.
+         roots = [
+@@ -167,8 +177,8 @@
+             + """
+ s=importlib.util.spec_from_file_location("draft_pr_publisher", "/opt/alfred-draft-pr-publisher-v1/__init__.py", submodule_search_locations=["/opt/alfred-draft-pr-publisher-v1"])
+ m=importlib.util.module_from_spec(s);sys.modules[s.name]=m;s.loader.exec_module(m)
+-from fresh_v1.role import main
+-main(sys.argv[1:])"""
++from fresh_v1.role import worker_main
++worker_main(sys.argv[1:])"""
+         )
+         home = pwd.getpwnam(user).pw_dir
+         python = (
+@@ -176,36 +186,53 @@
+             if user == "alfred"
+             else "/usr/bin/python3"
+         )
+-        result = command(
+-            [
+-                "/usr/sbin/runuser",
+-                "-u",
+-                user,
+-                "--",
+-                "/usr/bin/env",
+-                "-i",
+-                "HOME=" + home,
+-                "USER=" + user,
+-                "LOGNAME=" + user,
+-                "PATH=/usr/bin:/bin",
+-                "/usr/bin/setpriv",
+-                "--no-new-privs",
+-                "--inh-caps=-all",
+-                "--ambient-caps=-all",
+-                python,
+-                "-I",
+-                "-B",
+-                "-c",
+-                bootstrap,
+-                stage,
+-                "--job",
+-                str(self.jobdir(job)),
+-                "--policy",
+-                str(self.policy_path),
+-            ],
+-            timeout=1200,
+-        )
+-        return json.loads(result.stdout.decode().splitlines()[-1])
++        args = [
++            "/usr/sbin/runuser",
++            "-u",
++            user,
++            "--",
++            "/usr/bin/env",
++            "-i",
++            "HOME=" + home,
++            "USER=" + user,
++            "LOGNAME=" + user,
++            "PATH=/usr/bin:/bin",
++            "/usr/bin/setpriv",
++            "--no-new-privs",
++            "--inh-caps=-all",
++            "--ambient-caps=-all",
++            python,
++            "-I",
++            "-B",
++            "-c",
++            bootstrap,
++            stage,
++            "--job",
++            str(self.jobdir(job)),
++            "--policy",
++            str(policy_path),
++        ]
++        try:
++            result = command(args, timeout=1200)
++        except (
++            subprocess.CalledProcessError,
++            subprocess.TimeoutExpired,
++            OSError,
++        ) as exc:
++            evidence = worker_failure(stage, exc)
++            # This is failure evidence, never a successful result or a retry permit.
++            self.freeze_json(self.jobdir(job) / (stage + ".failure.json"), evidence)
++            raise WorkerFailure(evidence) from None
++        try:
++            output = json.loads(result.stdout.decode().splitlines()[-1])
++            if type(output) is not dict:
++                raise ValueError("worker result must be an object")
++        except (UnicodeError, ValueError, IndexError) as exc:
++            evidence = failure(stage, "worker_output", exc)
++            evidence.update(category="invalid_worker_result", worker_returncode=0)
++            self.freeze_json(self.jobdir(job) / (stage + ".failure.json"), evidence)
++            raise WorkerFailure(evidence) from None
++        return output
+ 
+     def intake(self, payload):
+         self.guard()
+--- a/fresh_v1/role.py
++++ b/fresh_v1/role.py
+@@ -4,18 +4,20 @@
+ import hashlib
+ import json
+ import os
+-import subprocess
++import sys
+ import tempfile
+ from pathlib import Path
+ 
+ from developer_v1.router import select_specialists
++from fresh_v1.diagnostics import WorkerFailure, failure, planning_output
+ from fresh_v1.handoffs import write_once
+ from fresh_v1.protected import identity, protected_json
+ 
+ 
+ def git(repo, *args):
+     return (
+-        subprocess.check_output(
++        planning_output(
++            "git_fetch" if "fetch" in args else "git_ref_verify",
+             ["/usr/bin/git", "-C", str(repo), "-c", "core.hooksPath=/dev/null", *args],
+             env={
+                 **os.environ,
+@@ -23,7 +25,6 @@
+                 "GIT_CONFIG_GLOBAL": os.devnull,
+                 "GIT_OPTIONAL_LOCKS": "0",
+             },
+-            stderr=subprocess.DEVNULL,
+             timeout=30,
+         )
+         .decode()
+@@ -61,7 +62,8 @@
+             raise ValueError("project outside activated low-risk policy")
+         if remote_main is None:
+             remote_main = (
+-                subprocess.check_output(
++                planning_output(
++                    "github_main_lookup",
+                     [
+                         "/usr/bin/gh",
+                         "api",
+@@ -100,7 +102,8 @@
+                 raise ValueError("main moved during planning")
+         with tempfile.TemporaryDirectory(prefix="alfred-cto-readback-") as directory:
+             snapshot = Path(directory)
+-            rows = subprocess.check_output(
++            rows = planning_output(
++                "git_tree",
+                 ["/usr/bin/git", "-C", str(repo), "ls-tree", "-rz", remote_main],
+                 timeout=20,
+             )
+@@ -118,7 +121,8 @@
+                     or ".." in Path(path).parts
+                 ):
+                     raise ValueError("unsupported planning tree")
+-                data = subprocess.check_output(
++                data = planning_output(
++                    "git_blob",
+                     ["/usr/bin/git", "-C", str(repo), "cat-file", "blob", oid],
+                     timeout=20,
+                 )
+@@ -180,7 +184,10 @@
+     parser.add_argument("--job", type=Path, required=True)
+     parser.add_argument("--policy", type=Path, required=True)
+     args = parser.parse_args(argv)
+-    policy, _ = protected_json(args.policy)
++    try:
++        policy, _ = protected_json(args.policy)
++    except (OSError, ValueError) as exc:
++        raise WorkerFailure(failure(args.stage, "policy_read", exc)) from None
+     if (
+         policy.get("schema") != "alfred.fresh-v1-policy/1"
+         or policy.get("enabled") is not True
+@@ -190,7 +197,10 @@
+         )
+     ):
+         raise ValueError("fresh V1 dispatch is disabled or paused")
+-    job, _ = protected_json(args.job / "job.json")
++    try:
++        job, _ = protected_json(args.job / "job.json")
++    except (OSError, ValueError) as exc:
++        raise WorkerFailure(failure(args.stage, "job_read", exc)) from None
+     identity(job["project"], job["task_id"])
+     if (
+         args.job != Path(policy["jobs"]) / job["project"] / job["task_id"]
+@@ -290,5 +300,24 @@
+     print(json.dumps(output, sort_keys=True))
+ 
+ 
++def worker_main(argv=None):
++    """Process boundary: redact exceptions before any traceback can escape."""
++    try:
++        main(argv)
++    except Exception as exc:  # noqa: BLE001 - never emit credentials/model output
++        stage = (argv or sys.argv[1:] or [None])[0]
++        from fresh_v1.diagnostics import STAGES
++
++        if stage not in STAGES:
++            raise SystemExit(1) from None
++        evidence = (
++            exc.evidence
++            if isinstance(exc, WorkerFailure)
++            else failure(stage, "python", exc)
++        )
++        print(json.dumps(evidence, sort_keys=True), file=sys.stderr)
++        raise SystemExit(1) from None
++
++
+ if __name__ == "__main__":
+-    main()
++    worker_main()
+--- /dev/null
++++ b/fresh_v1/diagnostics.py
+@@ -0,0 +1,127 @@
++"""Allowlisted failure evidence. Never retain commands, exception text or output."""
++
++import json
++import subprocess
++
++from .handoffs import Held
++
++SCHEMA = "alfred.fresh-v1-worker-failure/1"
++STAGES = {"plan", "developer", "qa", "reviewer", "prepare", "publish", "completion"}
++PHASES = {
++    "worker_startup",
++    "worker_output",
++    "policy_read",
++    "job_read",
++    "python",
++    "github_main_lookup",
++    "git_fetch",
++    "git_ref_verify",
++    "git_tree",
++    "git_blob",
++}
++CATEGORIES = {
++    "permission_denied",
++    "read_only_filesystem",
++    "unsafe_repository_ownership",
++    "authentication_refused",
++    "network_unavailable",
++    "missing_object",
++    "pam_session_refused",
++    "timeout",
++    "process_failed",
++    "python_failed",
++    "invalid_worker_result",
++}
++
++
++class WorkerFailure(Held):
++    def __init__(self, evidence):
++        self.evidence = evidence
++        super().__init__(
++            f"{evidence['stage']}: {evidence['phase']}/{evidence['category']}"
++        )
++
++
++def failure(stage, phase, exc):
++    category = "python_failed"
++    rc = None
++    if isinstance(exc, subprocess.TimeoutExpired):
++        category = "timeout"
++    elif isinstance(exc, subprocess.CalledProcessError):
++        rc = exc.returncode
++        category = "process_failed"
++        stderr = (exc.stderr or b"")[:65536]
++        if isinstance(stderr, str):
++            stderr = stderr.encode()
++        stderr = stderr.lower()
++        for needles, value in (
++            ((b"runuser: cannot open session",), "pam_session_refused"),
++            (
++                (b"dubious ownership", b"unsafe repository"),
++                "unsafe_repository_ownership",
++            ),
++            ((b"read-only file system",), "read_only_filesystem"),
++            ((b"permission denied", b"permissionerror"), "permission_denied"),
++            (
++                (b"authentication failed", b"http 401", b"gh auth login"),
++                "authentication_refused",
++            ),
++            (
++                (b"could not resolve", b"error connecting", b"network is unreachable"),
++                "network_unavailable",
++            ),
++            ((b"not a valid object", b"bad object", b"not our ref"), "missing_object"),
++        ):
++            if any(needle in stderr for needle in needles):
++                category = value
++                break
++    elif isinstance(exc, OSError):
++        category = {13: "permission_denied", 30: "read_only_filesystem"}.get(
++            exc.errno, "python_failed"
++        )
++    return {
++        "schema": SCHEMA,
++        "stage": stage,
++        "phase": phase,
++        "category": category,
++        "operation_returncode": rc,
++        "errno": getattr(exc, "errno", None),
++    }
++
++
++def worker_failure(stage, exc):
++    """Accept only a bounded, exact schema from the unprivileged worker."""
++    result = failure(stage, "worker_startup", exc)
++    raw = getattr(exc, "stderr", None) or b""
++    if isinstance(raw, str):
++        raw = raw.encode()
++    # The role emits one small line. Arbitrary output remains private and discarded.
++    if len(raw) <= 4096:
++        try:
++            row = json.loads(raw)
++            if (
++                type(row) is dict
++                and set(row) == set(result)
++                and row["schema"] == SCHEMA
++                and row["stage"] == stage
++                and row["phase"] in PHASES
++                and row["category"] in CATEGORIES
++                and all(
++                    v is None or (type(v) is int and -255 <= v <= 255)
++                    for v in (row["operation_returncode"], row["errno"])
++                )
++            ):
++                result = row
++        except (ValueError, TypeError):
++            pass
++    result["worker_returncode"] = getattr(exc, "returncode", None)
++    return result
++
++
++def planning_output(phase, args, *, timeout, env=None):
++    try:
++        return subprocess.check_output(
++            args, stderr=subprocess.PIPE, timeout=timeout, env=env
++        )
++    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
++        raise WorkerFailure(failure("plan", phase, exc)) from None
+--- a/tests/test_fresh_v1_release.py
++++ b/tests/test_fresh_v1_release.py
+@@ -203,15 +203,20 @@
+     )
+ 
+ 
+-def test_worker_dispatch_clears_environment_and_selects_existing_uid():
+-    adapter = host.Host({"jobs": "/var/lib/alfred-v1-handoffs"})
++def test_worker_dispatch_clears_environment_and_selects_existing_uid(tmp_path):
++    adapter = host.Host({"jobs": str(tmp_path)})
++    (tmp_path / "dev-v1-accept/T-0038").mkdir(parents=True)
+     calls = []
+ 
+     def capture(args, **kwargs):
+         calls.append(args)
+         return type("Result", (), {"stdout": b'{"decision":"PASS"}\n'})()
+ 
+-    with patch.object(host, "command", capture), patch.object(adapter, "guard"):
++    with (
++        patch.object(host, "command", capture),
++        patch.object(adapter, "guard"),
++        patch.object(adapter, "share"),
++    ):
+         assert (
+             adapter.worker(
+                 {"project": "dev-v1-accept", "task_id": "T-0038"}, "qa", "alfredqa"

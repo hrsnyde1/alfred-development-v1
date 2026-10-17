@@ -1,0 +1,78 @@
+# Staging template only. Never install/enable until separate authorization.
+# Instances: initial, reconnect. No IPAddressAllow line means no IP traffic.
+[Unit]
+Description=Disposable Photon native reply-target test (%i)
+Documentation=man:systemd.exec(5) man:systemd.resource-control(5)
+AssertPathExists=/srv/photon-reply-test/root/app/MANIFEST.sha256
+AssertPathExists=/srv/photon-reply-test/root/app/bin/node
+AssertPathExists=/etc/photon-reply-test/credentials.json
+AssertPathExists=/etc/photon-reply-test/metadata.json
+AssertPathExists=/etc/photon-reply-test/os-acceptance.ok
+
+[Service]
+Type=exec
+User=photon-reply-test
+Group=photon-reply-test
+UMask=0077
+RootDirectory=/srv/photon-reply-test/root
+WorkingDirectory=/app
+ExecStartPre=/app/bin/node /app/scripts/integrity.mjs --verify
+ExecStartPre=/app/bin/node /app/scripts/startup-gate.mjs
+ExecStart=/app/bin/node /app/src/runtime.mjs --live
+Environment=PHOTON_TEST_ISOLATED=1
+Environment=PHOTON_TEST_PHASE=%i
+Environment=PHOTON_TEST_RESULT_DIR=/var/lib/photon-reply-test/%i
+Environment=PHOTON_TEST_COMMAND_SOCKET=/run/photon-reply-test-%i/control.sock
+Environment=HOME=/tmp
+Environment=TMPDIR=/tmp
+UnsetEnvironment=NODE_OPTIONS NODE_PATH SPECTRUM_CLOUD_URL SPECTRUM_FUSOR_WS_URL SPECTRUM_IMESSAGE_ADDRESS PHOTON_PROJECT_ID PHOTON_PROJECT_SECRET HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
+LoadCredential=credentials.json:/etc/photon-reply-test/credentials.json
+LoadCredential=metadata.json:/etc/photon-reply-test/metadata.json
+RuntimeDirectory=photon-reply-test-%i
+RuntimeDirectoryMode=0700
+StateDirectory=photon-reply-test/%i
+StateDirectoryMode=0700
+# /lib and /lib64 are relative links to /usr/lib and /usr/lib64 in the reviewed root.
+BindReadOnlyPaths=/usr:/usr /etc/ssl/certs:/etc/ssl/certs
+MountAPIVFS=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+RemoveIPC=yes
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+# Separately reviewed numeric test-provider IPs only; add via a reviewed drop-in.
+# IPAddressAllow=198.51.100.0/32
+SocketBindDeny=any
+KeyringMode=private
+LimitNOFILE=256
+TasksMax=64
+MemoryMax=512M
+RuntimeMaxSec=2h
+Restart=no
+KillMode=control-group
+TimeoutStartSec=60
+TimeoutStopSec=10
+StandardInput=null
+StandardOutput=null
+StandardError=null
+
+# Intentionally no [Install] section: human-operated one-shot sessions only.
