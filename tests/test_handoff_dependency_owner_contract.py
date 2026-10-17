@@ -257,15 +257,20 @@ def installed_fixture(tmp_path, monkeypatch):
         path = preparation.host("/opt/alfred-developer-v1/" + name)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(raw)
+        # Explicit modes: the host's alfred umask (002) would otherwise make these
+        # group-writable, which read() correctly refuses. Production files are 0644/0600.
+        path.chmod(0o644)
         lines.append(hashlib.sha256(raw).hexdigest() + "  " + name)
     manifest = preparation.host("/opt/alfred-developer-v1/developer_v1/release.sha256")
     manifest.write_text("\n".join(lines) + "\n")
+    manifest.chmod(0o644)
     pins["/opt/alfred-developer-v1/developer_v1/release.sha256"] = hashlib.sha256(
         manifest.read_bytes()
     ).hexdigest()
     pin_file = release / "development_challenge/installed-sha256.json"
     pin_file.parent.mkdir(parents=True)
     pin_file.write_text(json.dumps(pins))
+    pin_file.chmod(0o600)
     marker = preparation.host("/opt/alfred-developer-v1/active")
     marker.write_bytes(b"ACTIVE FIXTURE\n")
     marker.chmod(0o644)
