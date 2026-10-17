@@ -133,6 +133,18 @@ def verify_git(repo: Path, baseline: str, revision: str, commits: list[str],
     return sha(diff)
 
 
+def informational_findings(review: dict) -> list:
+    """An APPROVED review's findings, which may only be informational notes."""
+    findings = review.get("findings")
+    require(type(findings) is list and all(
+                type(f) is dict and set(f) == {"severity", "requirement", "detail", "evidence"} and
+                f["severity"] == "info" and
+                all(type(f[k]) is str and f[k] for k in ("requirement", "detail", "evidence"))
+                for f in findings),
+            "review", "Reviewer findings other than informational block publication")
+    return findings
+
+
 def verify_inputs(*, config_path: Path, registry_path: Path, handoff_path: Path,
                   review_path: Path, qa_path: Path, qa_handoff_path: Path,
                   plan_path: Path, grant_path: Path, spec_path: Path,
@@ -166,6 +178,7 @@ def verify_inputs(*, config_path: Path, registry_path: Path, handoff_path: Path,
             review.get("scope") == "PASS" and review.get("next_authorized_stage") == "github_draft_pr_preparation" and
             handoff.get("review_report_sha256") == review_sha,
             "review", "Review is not an internally consistent APPROVED decision")
+    findings = informational_findings(review)
     require(qa.get("schema") == "alfred.qa-report/1" and qa.get("decision") == "PASS" and
             qa.get("next_authorized_action") == "independent_reviewer" and
             qa_handoff.get("schema") == "alfred.reviewer-handoff/1" and
@@ -247,7 +260,9 @@ def verify_inputs(*, config_path: Path, registry_path: Path, handoff_path: Path,
             "diff_sha256": diff_sha, "qa_report_sha256": qa_sha,
             "review_report_sha256": review_sha, "publication_handoff_sha256": handoff_sha,
             "cto_plan_sha256": plan_sha, "development_grant_sha256": grant_sha,
-            "task_spec_sha256": spec_sha, "status": "READY_FOR_OWNER_AUTHORIZATION"}
+            "task_spec_sha256": spec_sha, "status": "READY_FOR_OWNER_AUTHORIZATION",
+            # Sealed with the plan and shown in the owner's publication approval text.
+            "review_findings": findings}
 
 
 def write_same_or_new(path: Path, value: dict) -> str:

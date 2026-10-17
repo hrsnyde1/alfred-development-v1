@@ -435,6 +435,7 @@ class World(host.Host):
         def review_model(context):
             answer, used = model_answer(context)
             answer["decision"] = self.review_decision
+            answer["findings"] = list(getattr(self, "review_findings", []))
             return answer, used
 
         def local_push(source, plan, token):
