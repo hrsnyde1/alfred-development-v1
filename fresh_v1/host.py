@@ -935,6 +935,17 @@ def root_directory(root):
         raise ValueError("unprotected handoff root")
 
 
+# Holds that follow a stage's recorded result: a verdict, never an uncertain effect.
+VERDICT_HOLDS = frozenset({
+    "developer did not produce a completed handoff",
+    "independent QA did not pass",
+    "independent Reviewer did not approve",
+    "independent Reviewer correctness or scope did not pass",
+    "independent Reviewer acceptance criteria are not all PASS",
+    "independent Reviewer findings require resolution",
+})
+
+
 def poll(policy_path=POLICY):
     require_root()
     policy, _ = protected_json(policy_path)
@@ -965,6 +976,7 @@ def poll(policy_path=POLICY):
         held_challenge = False
         held_failure = None
         waiting = None
+        held = None
         for line in read_owned(journal, host.uids["alfred"]).splitlines():
             row = json.loads(line)
             if (
@@ -1047,9 +1059,19 @@ def poll(policy_path=POLICY):
                 # Waiting on the owner does no work; let the next task run this tick.
                 waiting = waiting or result
                 continue
+            if result["state"] == "held" and result.get("reason") in VERDICT_HOLDS:
+                # Held by a definite, recorded verdict (QA failed, the Reviewer did
+                # not approve): it does nothing more until someone acts on it, so it
+                # must not starve later requests. Its evidence is untouched and
+                # nothing is retried. Any other hold, above all an uncertain attempt
+                # that "requires reconciliation", still blocks everything after it.
+                held = held or result
+                continue
             return result  # One bounded fresh task per existing timer tick.
         if waiting:
             return waiting
+        if held:
+            return held
         if held_failure:
             return {"state": "held", "reason": held_failure + ": recorded failure; task held"}
         return ({"state": "held", "reason": "development-challenge: previous attempt requires reconciliation"}

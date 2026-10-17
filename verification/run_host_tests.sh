@@ -93,6 +93,10 @@ run handoff11 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_plain_lan
 run handoff12 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_multi_project.py \
   tests/test_development_handoff12_upgrade.py --junitxml="$OUT/handoff12.xml"
 
+# handoff.14: a task held by a recorded verdict no longer blocks later requests.
+run handoff14 "$PYTHON" -B -m pytest -q -p no:cacheprovider \
+  tests/test_development_handoff14_upgrade.py --junitxml="$OUT/handoff14.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"
