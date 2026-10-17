@@ -404,6 +404,7 @@ class World(host.Host):
 
     def worker(self, job, stage, user):
         self.guard()
+        self.dispatched = True  # As Host.worker, immediately before the role starts.
         self.calls.append((stage, user))
         real_execute, real_review, real_publish, real_notify = (
             pipeline.execute_gateway_task,
@@ -434,6 +435,7 @@ class World(host.Host):
         def review_model(context):
             answer, used = model_answer(context)
             answer["decision"] = self.review_decision
+            answer["findings"] = list(getattr(self, "review_findings", []))
             return answer, used
 
         def local_push(source, plan, token):
@@ -564,10 +566,10 @@ def test_native_request_to_real_workers_draft_and_completion(world):
     assert [
         u for s, u in world.calls if s in {"developer", "qa", "reviewer", "publish"}
     ] == ["alfred", "alfredqa", "alfredreview", "alfredpublish"]
-    assert (
-        task in world.notifications[0] and "remains a draft" in world.notifications[0]
-    )
-    assert "Deployment has not been verified" in world.notifications[0]
+    # Plain language for the owner: no task number, clearly not live.
+    assert task not in world.notifications[0]
+    assert "draft for your review" in world.notifications[0]
+    assert "Nothing is live yet" in world.notifications[0]
     assert world.tick()["state"] == "complete"
     assert (
         len(world.messages) == 3 and len(world.pushes) == len(world.notifications) == 1
@@ -895,7 +897,8 @@ def test_expired_publication_reply_cannot_create_authorization(world):
     world.tick()
     current = world.publication_issuer.clock()
     with (
-        patch.object(world.publication_issuer, "clock", return_value=current + 1000),
+        patch.object(world.publication_issuer, "clock",
+                     return_value=current + publication_approval.SIMPLE_MAX_AGE + 1),
         pytest.raises(IntakeRefused),
     ):
         world.approve_publication()

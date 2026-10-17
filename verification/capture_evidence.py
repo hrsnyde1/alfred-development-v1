@@ -39,6 +39,7 @@ STAGES = (
     "development-challenge",
     "developer",
     "qa",
+    "qa-recovery-1",
     "reviewer",
     "publication-plan",
     "publication-challenge",
@@ -52,6 +53,7 @@ SUMMARY_FIELDS = {
     "development-challenge": ("state", "challenge"),
     "developer": ("state",),
     "qa": ("decision", "final_revision", "next_authorized_action"),
+    "qa-recovery-1": ("decision", "final_revision", "next_authorized_action"),
     "reviewer": ("decision", "correctness", "next_authorized_stage"),
     "publication-plan": ("status", "publication_plan_sha256"),
     "publication-challenge": ("state", "challenge"),
@@ -103,11 +105,13 @@ def stage_record(directory: Path, name: str) -> dict:
             record["summary"] = {
                 key: result[key] for key in SUMMARY_FIELDS[name] if key in result
             }
-            if name == "qa":
+            if name in ("qa", "qa-recovery-1"):
                 record["summary"]["qa_model_present"] = (
                     result.get("qa_model") is not None
                 )
-            if name in ("qa", "reviewer") and isinstance(result.get("findings"), list):
+            if name in ("qa", "qa-recovery-1", "reviewer") and isinstance(
+                result.get("findings"), list
+            ):
                 record["summary"]["findings"] = len(result["findings"])
         if kind == "failure" and raw is not None:
             failure = load(raw)
@@ -138,6 +142,7 @@ def evaluate(records: dict, complete: dict | None, grant: bool, destination: str
         return gate(check(summary), detail=None if check(summary) else detail)
 
     plan_stage = "plan-recovery-1" if records["plan-recovery-1"]["attempt"] else "plan"
+    qa_stage = "qa-recovery-1" if records["qa-recovery-1"]["attempt"] else "qa"
     pr = re.compile(
         r"https://github\.com/" + re.escape(destination) + r"/pull/[0-9]+\Z"
     )
@@ -155,7 +160,7 @@ def evaluate(records: dict, complete: dict | None, grant: bool, destination: str
             "developer not complete",
         ),
         "qa_pass_with_model": judged(
-            "qa",
+            qa_stage,
             lambda s: s.get("decision") == "PASS" and s.get("qa_model_present"),
             "QA did not pass",
         ),

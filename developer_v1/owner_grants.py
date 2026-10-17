@@ -26,6 +26,65 @@ REF = re.compile(r"[0-9a-f]{32}\Z")
 MAX_AGE = 300
 PERMISSIONS = {"read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"}
 
+# The owner's standing delegation. Only root (the owner, via sudo) writes it, so no
+# model, Hermes or worker identity can widen it. Absent means every development
+# approval goes to the owner's phone exactly as before.
+DELEGATION_POLICY = Path("/etc/alfred-development/delegation.json")
+DELEGATION_SCHEMA = "alfred.development-delegation-policy/1"
+PROJECT_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,63}\Z")
+OWNER_SOURCE = "photon_native_owner_reply"
+DELEGATED_SOURCE = "delegated_owner_policy"
+
+
+def load_delegation_policy(path: Path | None, *, owner_uid: int) -> dict | None:
+    """The validated policy, or None when absent. Anything malformed is refused."""
+    if path is None:
+        return None
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise Denied("development delegation policy unreadable") from exc
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != owner_uid
+                or info.st_mode & 0o022 or info.st_size > 4096):
+            raise Denied("development delegation policy is not owner-protected")
+        try:
+            policy = json.loads(stream.read())
+        except ValueError as exc:
+            raise Denied("development delegation policy is not JSON") from exc
+    development = policy.get("development_approval") if type(policy) is dict else None
+    projects = development.get("projects") if type(development) is dict else None
+    if (type(policy) is not dict
+            or set(policy) != {"schema", "development_approval", "publication_approval"}
+            or policy["schema"] != DELEGATION_SCHEMA
+            # Publication is never delegable in V1; the owner approves every draft PR.
+            or policy["publication_approval"] != "owner"
+            or set(development) != {"enabled", "projects"}
+            or type(development["enabled"]) is not bool
+            or type(projects) is not list or len(projects) != len(set(projects))
+            or any(type(p) is not str or not PROJECT_ID.fullmatch(p) for p in projects)):
+        raise Denied("development delegation policy invalid")
+    return policy
+
+
+def _policy_path(path: Path | None, environment: str) -> Path | None:
+    # Staging never reads the host policy implicitly; a fixture names its own.
+    return path if path is not None else (DELEGATION_POLICY if environment == "host" else None)
+
+
+def _policy_owner(environment: str) -> int:
+    # On the host only root may own the policy; staging fixtures are the test user's.
+    return 0 if environment == "host" else os.geteuid()
+
+
+def delegation_permits(policy: dict | None, project: str) -> bool:
+    """Only explicitly listed registered projects; never a wildcard."""
+    return (policy is not None and policy["development_approval"]["enabled"]
+            and project in policy["development_approval"]["projects"])
+
 
 class DevelopmentSendFailure(OSError):
     """Only the protected transport may classify a send; no raw provider text."""
@@ -43,6 +102,12 @@ class DevelopmentSendFailure(OSError):
 def _send_slot(request: dict) -> str:
     # An exact task may be attempted once. Changing its plan/DM cannot bypass it.
     return "development-send-" + _digest({
+        "project": request["project"], "task_id": request["task_id"],
+    }) + ".json"
+
+
+def _delegation_slot(request: dict) -> str:
+    return "development-delegation-" + _digest({
         "project": request["project"], "task_id": request["task_id"],
     }) + ".json"
 
@@ -224,13 +289,65 @@ def _verify_evidence(root: Path, reference: str, grant: dict, expected: dict) ->
         raise Denied("issuance digest does not match immutable evidence")
 
 
+def _verify_delegation(root: Path, reference: str, grant: dict, expected: dict,
+                       policy: dict | None) -> None:
+    """A delegated grant executes only while the owner's policy still permits it."""
+    try:
+        record = _read(root, f"delegation-{reference}.json")
+        issuance = _read(root, f"issuance-{reference}.json")
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        raise Denied("delegated grant lacks trusted delegation evidence") from exc
+    request = {"schema": "alfred.development-approval-request/1",
+               **{key: value for key, value in expected.items() if key != "schema"},
+               "state": "pending_owner_decision"}
+    if (record.get("schema") != "alfred.development-delegated-decision/1"
+            or record.get("reference") != reference or record.get("request") != request
+            or record.get("decision") != "approve_development"
+            or record.get("decided_by") != "owner_delegation_policy"
+            or type(record.get("policy")) is not dict
+            or record.get("policy_sha256") != _digest(record["policy"])
+            or not delegation_permits(record["policy"], request["project"])
+            or not isinstance(record.get("owner_id"), str) or not record["owner_id"]
+            or not isinstance(record.get("space_id"), str) or not record["space_id"]
+            or not isinstance(record.get("decided_at"), (int, float))
+            or grant.get("delegation_sha256") != _digest(record)):
+        raise Denied("delegation record does not bind canonical approval")
+    if not delegation_permits(policy, request["project"]):
+        raise Denied("owner delegation policy no longer permits this project")
+    if (set(issuance) != {"schema", "reference", "grant_sha256", "delegation_sha256",
+                         "policy_sha256", "bundle_sha256", "issued_at"}
+            or issuance.get("schema") != "alfred.development-delegated-issuance/1"
+            or issuance.get("reference") != reference
+            or issuance.get("grant_sha256") != _digest(grant)
+            or issuance.get("delegation_sha256") != _digest(record)
+            or issuance.get("policy_sha256") != record["policy_sha256"]
+            or issuance.get("bundle_sha256") != _digest(_bytes(grant) + _bytes(record))
+            or issuance.get("issued_at") != record["decided_at"]):
+        raise Denied("delegated issuance digest does not match immutable evidence")
+
+
+class _DelegatedDecision:
+    """The owner's standing policy, not a reply; recorded as exactly that."""
+
+    def __init__(self, reference: str, owner: str):
+        self.reference, self.owner = reference, owner
+
+    def verify(self, reference: str, expected: dict) -> dict:
+        if reference != self.reference:
+            raise Denied("delegation reference mismatch")
+        return {**expected, "owner": self.owner, "decision": "approve_development",
+                "source": "independent_owner_channel", "reference": reference}
+
+
 class ProtectedDevelopmentAuthority:
-    def __init__(self, root: Path, *, clock=time.time, environment: str = "host"):
+    def __init__(self, root: Path, *, clock=time.time, environment: str = "host",
+                 delegation_policy: Path | None = None):
         if environment not in {"host", "staging"}:
             raise Denied("invalid grant environment")
         self.root = root
         self.clock = clock
         self.environment = environment
+        self.delegation_policy = _policy_path(delegation_policy, environment)
         self.activation_marker = Path("/opt/alfred-developer-v1/active")
 
     def verify(self, reference: str, expected: dict) -> dict:
@@ -249,7 +366,8 @@ class ProtectedDevelopmentAuthority:
         except (FileNotFoundError, OSError, ValueError) as exc:
             raise Denied("development grant unavailable") from exc
         if (grant.get("reference") != reference or grant.get("issuer") != "trusted_owner_authority"
-                or grant.get("state") != "approved" or grant.get("source") != "photon_native_owner_reply"
+                or grant.get("state") != "approved"
+                or grant.get("source") not in {OWNER_SOURCE, DELEGATED_SOURCE}
                 or grant.get("environment") != self.environment
                 or set(grant.get("permissions", [])) != PERMISSIONS
                 or any(grant.get(k) != v for k, v in expected.items())):
@@ -258,7 +376,11 @@ class ProtectedDevelopmentAuthority:
             raise Denied("development grant expired")
         if (self.root / f"revoke-{reference}").exists():
             raise Denied("development grant revoked")
-        _verify_evidence(self.root, reference, grant, expected)
+        if grant["source"] == DELEGATED_SOURCE:
+            _verify_delegation(self.root, reference, grant, expected, load_delegation_policy(
+                self.delegation_policy, owner_uid=_policy_owner(self.environment)))
+        else:
+            _verify_evidence(self.root, reference, grant, expected)
         return grant
 
     def claim(self, reference: str, expected: dict, *, run_sha256: str) -> dict:
@@ -307,7 +429,7 @@ class DevelopmentGrantIssuer:
 
     def __init__(self, root: Path, *, owner_sender_id: str, preview_sender,
                  sidecar_uid: int, clock=time.time, admin_uid: int = 0,
-                 environment: str = "host"):
+                 environment: str = "host", delegation_policy: Path | None = None):
         _protected(root)
         self.root, self.owner, self.send = root, owner_sender_id, preview_sender
         if environment not in {"host", "staging"}:
@@ -316,7 +438,42 @@ class DevelopmentGrantIssuer:
             raise Denied("Photon and administrator identities must differ")
         self.clock, self.admin_uid, self.sidecar_uid = clock, admin_uid, sidecar_uid
         self.environment = environment
+        self.delegation_policy = _policy_path(delegation_policy, environment)
         self._lock = threading.Lock()
+
+    def _delegate(self, request: dict, space_id: str, policy: dict) -> dict:
+        """Issue a grant under the owner's standing policy. Nothing is sent and no
+        owner reply is fabricated: the evidence says the policy decided."""
+        # One decision per task, whether by the owner or by delegation.
+        try:
+            _write_once(self.root, _delegation_slot(request), {
+                "schema": "alfred.development-delegation-attempt/1",
+                "project": request["project"], "task_id": request["task_id"]})
+        except FileExistsError as exc:
+            raise Denied("development delegation already attempted for this task") from exc
+        reference = uuid.uuid4().hex
+        now = self.clock()
+        record = {"schema": "alfred.development-delegated-decision/1",
+                  "reference": reference, "request": request,
+                  "decision": "approve_development", "decided_by": "owner_delegation_policy",
+                  "policy": policy, "policy_sha256": _digest(policy),
+                  "owner_id": self.owner, "space_id": space_id, "decided_at": now}
+        _write_once(self.root, f"delegation-{reference}.json", record)
+        grant = stage_owner_transition(
+            request, decision_reference=reference, expected_owner=self.owner,
+            verifier=_DelegatedDecision(reference, self.owner), grant_reference=reference)
+        grant.update({"source": DELEGATED_SOURCE, "delegation_sha256": _digest(record),
+                      "expires_at": now + 86400, "environment": self.environment,
+                      "permissions": sorted(PERMISSIONS)})
+        _write_once(self.root, f"issuance-{reference}.json", {
+            "schema": "alfred.development-delegated-issuance/1", "reference": reference,
+            "grant_sha256": _digest(grant), "delegation_sha256": _digest(record),
+            "policy_sha256": record["policy_sha256"],
+            "bundle_sha256": _digest(_bytes(grant) + _bytes(record)), "issued_at": now})
+        _write_once(self.root, f"grant-{reference}.json", grant)
+        # `challenge` keeps the host's existing stage contract: it names the grant.
+        return {"state": "development_approved_by_delegation", "challenge": reference,
+                "reference": reference}
 
     def _ack_pending(self):
         """Index durable acknowledgements if interrupted before pending indexing.
@@ -368,7 +525,8 @@ class DevelopmentGrantIssuer:
         # binding recompute the request; raw client-supplied requests are refused
         # by the intake extension.
         with self._lock:
-            if (self.root / _send_slot(request)).exists():
+            if ((self.root / _send_slot(request)).exists()
+                    or (self.root / _delegation_slot(request)).exists()):
                 raise Denied("development challenge already attempted; reconciliation required")
             for path in self.root.glob("pending-*.json"):
                 prior = _read(self.root, path.name)
@@ -395,6 +553,10 @@ class DevelopmentGrantIssuer:
                         and old.get("task_id") == request["task_id"]
                         and not (self.root / f"revoke-{old_reference}").exists()):
                     raise Denied("existing task grant must be revoked before restaging")
+            policy = load_delegation_policy(self.delegation_policy,
+                                            owner_uid=_policy_owner(self.environment))
+            if delegation_permits(policy, request["project"]):
+                return self._delegate(request, space_id, policy)
             challenge = uuid.uuid4().hex
             phrase = _phrase(request)
             message = _challenge_text(request, plan_raw)

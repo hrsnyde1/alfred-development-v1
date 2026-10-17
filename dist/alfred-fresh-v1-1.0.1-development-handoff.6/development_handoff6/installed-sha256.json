@@ -1,0 +1,6 @@
+{
+  "/opt/alfred-developer-v1/developer_v1/real_worker.py": "0c29350880f3fc76af87790554afff2b3a20d974a3f94981fcc8b3cb8e460b3f",
+  "/opt/alfred-developer-v1/developer_v1/release.sha256": "7e819693e2c514d2c346f9f58227a9dd8b95a6d0c3d10adc21246be3c11fe6c7",
+  "/opt/alfred-reviewer-v1/independent_reviewer/release.sha256": "f6f789de9a8bb5e4e6b9dd67db9decc5e8ee760c203ebba6a45ef61532cc5832",
+  "/opt/alfred-reviewer-v1/independent_reviewer/worker.py": "8ce51233d5c56c0db3ad1d7d185c33aace41ac21088107a860e8c5959359e39b"
+}

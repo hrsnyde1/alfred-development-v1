@@ -44,6 +44,51 @@ run phase-a-and-installer "$PYTHON" -B -m pytest -q -p no:cacheprovider \
   tests/test_phase_a_continuation.py tests/test_development_handoff_upgrade.py \
   tests/test_handoff_dependency_owner_contract.py --junitxml="$OUT/phase-a-and-installer.xml"
 
+# 3b. handoff.3: Evidence sandbox write paths, recorded-failure skip, two-file installer.
+run handoff3 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_evidence_sandbox_paths.py \
+  tests/test_development_handoff3_upgrade.py tests/test_development_challenge_delivery.py \
+  --junitxml="$OUT/handoff3.xml"
+
+# 3c. handoff.4: writable lab repository, recorded pre-dispatch host failures, the
+#     one T-0005 QA recovery, and the four-file installer.
+run handoff4 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_fresh_v1_qa_recovery.py \
+  tests/test_development_handoff4_upgrade.py tests/test_evidence_sandbox_paths.py \
+  --junitxml="$OUT/handoff4.xml"
+
+# 3d. handoff.5: role identities observe PAUSE/STOP through the sandbox's read-only
+#     gateway view and still fail closed; the two-file installer.
+run handoff5 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_fresh_v1_role_gateway_view.py \
+  tests/test_development_handoff5_upgrade.py --junitxml="$OUT/handoff5.xml"
+
+# 3e. handoff.6: Developer and Reviewer accept Codex progress notes before exactly one
+#     final contract-shaped message; the four-file installer with inventory checks.
+run handoff6 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_model_message_contract.py \
+  tests/test_development_handoff6_upgrade.py --junitxml="$OUT/handoff6.xml"
+
+# 3f. handoff.7: root's snapshot clone trusts the worktree, its git directory and the
+#     registered common directory (git ownership hardening); the one-file installer.
+run handoff7 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_root_clone_ownership.py \
+  tests/test_development_handoff7_upgrade.py --junitxml="$OUT/handoff7.xml"
+
+# handoff.8: owner-delegated development approval, its installer, Independent QA's
+# evidence check and the restricted root operations helper.
+run handoff8 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_delegated_development_approval.py \
+  tests/test_development_handoff8_upgrade.py tests/test_alfred_dev_ops.py tests/test_independent_qa.py \
+  tests/test_developer_execution_v1.py --junitxml="$OUT/handoff8.xml"
+
+# handoff.9: the intake files the owner's request when Hermes submits a clarifying answer.
+run handoff9 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_intake_clarifying_answer.py \
+  tests/test_development_handoff9_upgrade.py --junitxml="$OUT/handoff9.xml"
+
+# handoff.10: informational Reviewer findings advance; everything else still holds.
+run handoff10 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_reviewer_info_findings.py \
+  tests/test_development_handoff10_upgrade.py --junitxml="$OUT/handoff10.xml"
+
+# handoff.11: plain-language owner texts, "yes" approvals and owner-run resend.
+run handoff11 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_plain_language_approvals.py \
+  tests/test_development_handoff11_upgrade.py tests/test_completion_integration.py \
+  --junitxml="$OUT/handoff11.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"

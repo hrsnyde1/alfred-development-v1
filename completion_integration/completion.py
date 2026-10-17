@@ -136,10 +136,19 @@ def prepare(
         current = "The PR is now closed without a recorded merge."
     else:
         raise ValueError("unknown GitHub PR state")
-    text = (
-        f"{result['project']} · {result['task_id']}\n{summary}\n{current}\n"
-        f"{result['draft_pr_url']}\nDeployment has not been verified."
-    )
+    # Plain language for the owner; the technical summary above stays in the record.
+    if pr["merged"]:
+        # "You merged it" only with both GitHub readback and the owner's attestation.
+        status = ("You merged it on GitHub" if current.startswith("You subsequently")
+                  else f"GitHub shows it merged by {actor}") + \
+            ", but it isn't live until it's deployed."
+    elif pr.get("state") == "open" and pr["draft"]:
+        status = "It's on GitHub as a draft for your review. Nothing is live yet."
+    elif pr.get("state") == "open":
+        status = "It's on GitHub, ready for your review. Nothing is live yet."
+    else:
+        status = "It's on GitHub but was closed without merging."
+    text = f"All done with {result['project']}. {status}\n{result['draft_pr_url']}"
     if len(text) > 4000:
         raise ValueError("completion notification exceeds Photon text limit")
     return CompletionNotification(

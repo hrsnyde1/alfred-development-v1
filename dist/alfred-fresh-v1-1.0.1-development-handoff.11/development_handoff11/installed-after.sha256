@@ -1,0 +1,7 @@
+fee67e01c6bdc2017c7bf8d8e2dfeee4f1301577f51a63aa99cd00ec826953f7  /usr/local/lib/alfred-v1.1/trusted_intake.py
+fee67e01c6bdc2017c7bf8d8e2dfeee4f1301577f51a63aa99cd00ec826953f7  /opt/alfred-developer-v1/developer_v1/trusted_intake_development.py
+118e66841b8736f469da546d42043f6e2841d9bece9d20fa8124e7bac80024cf  /opt/alfred-developer-v1/developer_v1/publication_approval.py
+411011e6a6d809601581dae712c6951d082202f04427061367c448ad31c2d0c1  /usr/local/lib/alfred-fresh-v1/fresh_v1/handoffs.py
+d11ed1c414bd260bd94029f7bf038ba0b865ba1e2596ffae49abe7cd6422a732  /usr/local/lib/alfred-fresh-v1/fresh_v1/host.py
+c269d3ee1003cb26722619420cde0718a634dca21feaa914d56210c064c0e545  /usr/local/lib/alfred-completion-v1/completion_integration/completion.py
+0966e652667410920323a5f6b8d47a8ed2c574da4a4006166d3191641babd2ff  /usr/local/sbin/alfred-dev-ops

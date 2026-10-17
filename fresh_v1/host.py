@@ -6,6 +6,7 @@ Only Intake may verify native owner replies; only Publisher may push/create draf
 
 import argparse
 import fcntl
+import functools
 import hashlib
 import json
 import os
@@ -15,6 +16,7 @@ import socket
 import stat
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from .diagnostics import WorkerFailure, failure, worker_failure
@@ -24,6 +26,78 @@ from .protected import identity, protected_json
 POLICY = Path("/etc/alfred-fresh-v1/policy.json")
 RELEASE = "/usr/local/lib/alfred-fresh-v1"
 USERS = ("alfred", "alfredqa", "alfredreview", "alfredpublish")
+
+
+def predispatch(stage):
+    """A host fault before the worker process starts dispatched nothing, so it is a
+    definite failure. Record it as evidence; the poll then holds this task for good
+    instead of leaving an uncertain attempt that blocks every later request."""
+
+    def wrap(method):
+        @functools.wraps(method)
+        def run(self, job):
+            self.dispatched = False
+            try:
+                return method(self, job)
+            except (subprocess.SubprocessError, OSError) as exc:
+                if self.dispatched:
+                    raise
+                name = stage(self, job) if callable(stage) else stage
+                path = self.jobdir(job) / (name + ".failure.json")
+                if not path.exists():
+                    self.freeze_json(path, failure(name, "host_prepare", exc))
+                raise
+
+        return run
+
+    return wrap
+
+
+def worktree_git_dirs(source, repository, alfred_uid):
+    """The directories git checks for ownership when root clones an alfred-owned
+    linked worktree: the worktree, its own git directory and the registered
+    repository's common git directory. Any other layout is refused, not trusted."""
+    source, common = source.resolve(), (repository / ".git").resolve()
+    marker = read_owned(source / ".git", alfred_uid).decode().strip()
+    if not marker.startswith("gitdir: "):
+        raise Held("final worktree is not a linked git worktree")
+    gitdir = Path(marker.removeprefix("gitdir: ")).resolve()
+    if not gitdir.is_absolute() or gitdir.parent != common / "worktrees":
+        raise Held("final worktree does not belong to the registered repository")
+    return [source, gitdir, common]
+
+
+def clone_snapshot(source, destination, repository, alfred_uid, *, bare=False):
+    """Root's snapshot of an approved final worktree for the Reviewer/Publisher."""
+    trusted = worktree_git_dirs(source, repository, alfred_uid)
+    with tempfile.TemporaryDirectory(prefix="alfred-handoff-git-") as name:
+        cfg = Path(name) / "gitconfig"
+        cfg.write_text(
+            "[safe]\n"
+            + "".join(f"\tdirectory = {json.dumps(str(p))}\n" for p in trusted)
+        )
+        cfg.chmod(0o600)
+        command(
+            [
+                "/usr/bin/git",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "clone",
+                "--no-local",
+                *(["--bare"] if bare else []),
+                str(source),
+                str(destination),
+            ],
+            env={
+                "PATH": "/usr/bin:/bin",
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": str(cfg),
+            },
+        )
+
+
+def qa_stage(host, job):
+    return "qa-recovery-1" if (host.jobdir(job) / "qa.recovery.json").exists() else "qa"
 
 
 def read_owned(path, uid):
@@ -212,6 +286,7 @@ worker_main(sys.argv[1:])"""
             "--policy",
             str(policy_path),
         ]
+        self.dispatched = True
         try:
             result = command(args, timeout=1200)
         except (
@@ -268,6 +343,13 @@ worker_main(sys.argv[1:])"""
 
         verify(self.policy_path, self.jobdir(job))
 
+    def verify_qa_recovery(self, job):
+        require_root()
+        self.guard()
+        from .qa_recovery import verify
+
+        verify(self.policy_path, self.jobdir(job))
+
     def development_challenge(self, job):
         root = (
             Path(self.p["worktree_root"]) / f"fresh-{job['project']}-{job['task_id']}"
@@ -298,6 +380,7 @@ worker_main(sys.argv[1:])"""
         # and atomically claims this exact grant before model/worktree execution.
         return grant
 
+    @predispatch("developer")
     def developer(self, job):
         plan = json.loads(
             read_owned(
@@ -335,9 +418,14 @@ worker_main(sys.argv[1:])"""
         self.freeze_json(self.jobdir(job) / "execution.json", request, ("alfred",))
         return self.worker(job, "developer", "alfred")
 
+    @predispatch(qa_stage)
     def qa(self, job):
         root = self.jobdir(job)
         base = root / "qa-input"
+        if (root / "qa.recovery.json").exists():
+            # The one authorized T-0005 recovery reuses the complete root-built input
+            # of the undispatched original attempt; qa_recovery pinned its bytes.
+            return self.qa_dispatch(job, root, base)
         self.directory(base)
         source = Path(self.p["developer_state"])
         project, task = job["project"], job["task_id"]
@@ -378,14 +466,19 @@ worker_main(sys.argv[1:])"""
         self.copy(Path(self.p["registry"]), base / "registry.json", "alfred", ())
         plan = Path(self.p["gateway_state"]) / "cto-plans" / f"{project}-{task}.json"
         self.copy(plan, base / "gateway" / "cto-plans" / plan.name, "alfred", ())
-        for kind in (
-            "grant",
-            "challenge",
-            "decision",
-            "issuance",
-            "execution",
-            "execution-result",
-        ):
+        grant = json.loads(
+            read_owned(
+                Path(self.p["grant_root"]) / f"grant-{job['grant_reference']}.json",
+                self.uids["alfred"],
+            )
+        )
+        # A delegated grant carries the owner's policy record instead of a reply.
+        decided = (
+            ("delegation",)
+            if grant.get("source") == "delegated_owner_policy"
+            else ("challenge", "decision")
+        )
+        for kind in ("grant", *decided, "issuance", "execution", "execution-result"):
             name = f"{kind}-{job['grant_reference']}.json"
             self.copy(
                 Path(self.p["grant_root"]) / name, base / "grants" / name, "alfred", ()
@@ -412,6 +505,10 @@ worker_main(sys.argv[1:])"""
             if c.strip()
         ]
         self.freeze_json(base / "config.json", cfg)
+        return self.qa_dispatch(job, root, base)
+
+    def qa_dispatch(self, job, root, base):
+        project, task = job["project"], job["task_id"]
         self.share(base, ("alfredqa",))
         # Only the activated disposable project and this task's worktrees gain
         # read access. No other project/grant store is exposed to QA.
@@ -425,31 +522,12 @@ worker_main(sys.argv[1:])"""
             raise Held("independent QA model evidence missing")
         return result
 
-    def clone(self, source, destination, *, bare=False):
-        with tempfile.TemporaryDirectory(prefix="alfred-handoff-git-") as name:
-            cfg = Path(name) / "gitconfig"
-            cfg.write_text(
-                "[safe]\n\tdirectory = " + json.dumps(str(source.resolve())) + "\n"
-            )
-            cfg.chmod(0o600)
-            command(
-                [
-                    "/usr/bin/git",
-                    "-c",
-                    "core.hooksPath=/dev/null",
-                    "clone",
-                    "--no-local",
-                    *(["--bare"] if bare else []),
-                    str(source),
-                    str(destination),
-                ],
-                env={
-                    "PATH": "/usr/bin:/bin",
-                    "GIT_CONFIG_NOSYSTEM": "1",
-                    "GIT_CONFIG_GLOBAL": str(cfg),
-                },
-            )
+    def clone(self, source, destination, repository, *, bare=False):
+        clone_snapshot(
+            source, destination, repository, self.uids["alfred"], bare=bare
+        )
 
+    @predispatch("reviewer")
     def reviewer(self, job):
         root = self.jobdir(job)
         base = root / "reviewer-input"
@@ -472,7 +550,11 @@ worker_main(sys.argv[1:])"""
         manifest = json.loads(
             (qain / job["project"] / job["task_id"] / "qa-input.json").read_bytes()
         )
-        self.clone(Path(manifest["final_worktree"]), base / "snapshot")
+        self.clone(
+            Path(manifest["final_worktree"]),
+            base / "snapshot",
+            Path(manifest["repository"]),
+        )
         cfg = json.loads(
             Path(
                 self.p.get(
@@ -493,6 +575,7 @@ worker_main(sys.argv[1:])"""
         self.directory(root / "reviewer-output", "alfredreview")
         return self.worker(job, "reviewer", "alfredreview")
 
+    @predispatch("publication-plan")
     def publication_plan(self, job):
         root = self.jobdir(job)
         base = root / "publisher-input"
@@ -521,7 +604,12 @@ worker_main(sys.argv[1:])"""
                 root / "qa-input" / job["project"] / job["task_id"] / "qa-input.json"
             ).read_bytes()
         )
-        self.clone(Path(manifest["final_worktree"]), base / "source.git", bare=True)
+        self.clone(
+            Path(manifest["final_worktree"]),
+            base / "source.git",
+            Path(manifest["repository"]),
+            bare=True,
+        )
         cfg = {
             "schema": "alfred.draft-pr-config/1",
             "project": job["project"],
@@ -572,13 +660,51 @@ worker_main(sys.argv[1:])"""
 
     def publication_challenge(self, job):
         raw = (self.jobdir(job) / "publication/approved-plan.json").read_bytes()
+        plan = json.loads(
+            read_owned(
+                Path(self.p["gateway_state"])
+                / "cto-plans"
+                / f"{job['project']}-{job['task_id']}.json",
+                self.uids["alfred"],
+            )
+        )
+        # One plain-language line for the owner; the intake adds the project name.
+        goal = (plan.get("objective") or "").strip().splitlines()
         return self.intake(
             {
                 "op": "stage_publication_approval",
                 "plan_raw": raw.decode(),
                 "space_id": job["space_id"],
+                "summary": goal[0] if goal else "the approved change",
             }
         )
+
+    def publication_resend_authorized(self, job, n):
+        """The owner's root-written `alfred-dev-ops resend` record for the nth resend."""
+        path = self.jobdir(job) / f"publication-resend-{n}.json"
+        if not path.exists():
+            return False
+        record, _ = protected_json(path)
+        if record != {
+            "schema": "alfred.publication-resend/1",
+            "project": job["project"],
+            "task_id": job["task_id"],
+            "n": n,
+            "authorized_by": record.get("authorized_by"),
+            "authorized_at": record.get("authorized_at"),
+        }:
+            raise Held("publication resend authorization invalid")
+        return True
+
+    def publication_expired(self, reference):
+        """True only when that approval's window has passed without a decision."""
+        grants = Path(self.p["grant_root"])
+        if (grants / f"publication-decision-{reference}.json").exists():
+            return False
+        receipt = json.loads(
+            read_owned(grants / f"publication-challenge-{reference}.json", self.uids["alfred"])
+        )
+        return time.time() > receipt["expires_at"]
 
     def publication_authorization(self, job, reference):
         if not (
@@ -617,9 +743,11 @@ worker_main(sys.argv[1:])"""
             self.share(path.parent, ("alfredpublish",))
         return {"path": str(path)}
 
+    @predispatch("publisher")
     def publish(self, job):
         return self.worker(job, "publish", "alfredpublish")
 
+    @predispatch("completion")
     def completion(self, job):
         root = self.jobdir(job)
         base = root / "completion"
@@ -712,6 +840,7 @@ def poll(policy_path=POLICY):
         # T-0001/T-0002 without this record are never adopted or modified.
         journal = Path(policy["gateway_state"]) / "journal.jsonl"
         held_challenge = False
+        held_failure = None
         for line in read_owned(journal, host.uids["alfred"]).splitlines():
             row = json.loads(line)
             if (
@@ -776,10 +905,21 @@ def poll(policy_path=POLICY):
                 # genuine owner request; no old evidence is modified/adopted.
                 held_challenge = True
                 continue
+            failed = sorted(directory.glob("*.failure.json"))
+            if failed:
+                # A worker reported a definite failure and the stage is held for
+                # good. Like the uncertain send above, never revisit it and never
+                # let it starve a later genuine owner request; nothing is modified.
+                held_failure = held_failure or failed[0].name.removesuffix(
+                    ".failure.json"
+                )
+                continue
             result = advance(directory, job, host)
             if result["state"] == "complete":
                 write_once(directory / "complete.json", result)
             return result  # One bounded fresh task per existing timer tick.
+        if held_failure:
+            return {"state": "held", "reason": held_failure + ": recorded failure; task held"}
         return ({"state": "held", "reason": "development-challenge: previous attempt requires reconciliation"}
                 if held_challenge else {"state": "idle"})
     finally:

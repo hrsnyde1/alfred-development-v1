@@ -200,8 +200,12 @@ class IntakeGate:
                 raw = request.get("plan_raw")
                 if type(raw) is not str or len(raw) > 16384:
                     raise Denied("invalid publication plan bytes")
+                summary = request.get("summary")
+                if type(summary) is str and self.registry_path is not None:
+                    project = json.loads(raw).get("project")
+                    summary = f"{summary.rstrip('.')} ({self._display_name(project)})"
                 return self.publication_issuer.stage(raw.encode("utf-8"),
-                    space_id=request.get("space_id"), peer_uid=peer_uid)
+                    space_id=request.get("space_id"), peer_uid=peer_uid, summary=summary)
             except (Denied, OSError, ValueError) as exc:
                 raise IntakeRefused("publication_request_unavailable") from exc
         if op == "prepare_publication_authorization":
@@ -322,7 +326,8 @@ class IntakeGate:
                     raise IntakeRefused("confirmation_reused")
                 if event.get("nativeIsForward") is not False:
                     raise IntakeRefused("confirmation_unverified")
-                if text.strip().casefold() not in {"yes, go ahead", "yes go ahead"}:
+                if " ".join(text.casefold().replace(",", " ").split()).rstrip(".!") not in {
+                        "yes", "y", "go ahead", "yes go ahead", "start", "yes start"}:
                     raise IntakeRefused("confirmation_not_affirmative")
                 if active.envelope_data is None:
                     raise IntakeRefused("confirmation_unavailable")
@@ -409,6 +414,45 @@ class IntakeGate:
             raise IntakeRefused("explicit_authorized_project_required")
         return matches[0].id
 
+    def _display_name(self, project_id: str) -> str:
+        """The registry's human name for a project (e.g. "SC Products Group website")."""
+        from alfred.registry.loader import parse_registry, read_registry_data
+        registry = parse_registry(read_registry_data(self.registry_path))
+        names = [p.display_name for p in registry.projects if p.id == project_id]
+        return names[0] if len(names) == 1 and names[0] else project_id
+
+    def _linked_request(self, followup: Observed) -> Observed:
+        """Hermes asks a clarifying question first, then submits the owner's short answer
+        ("2", "yes"), which names no project. File the owner's own request from the same
+        DM within the event lifetime instead, exactly as if Hermes had submitted it. The
+        project still comes only from genuine owner text, and the preview still needs the
+        owner's native confirmation."""
+        now = self.clock()
+        candidates = []
+        for record in self._observed.values():
+            if (record is followup or record.space_digest != followup.space_digest
+                    or record.received_at > followup.received_at
+                    or now - record.received_at > MAX_EVENT_AGE
+                    or record.phase != "observed" or record.message_id in self._retired
+                    or record.message_id in self._completed or record.message_id in self._terminal):
+                continue
+            try:
+                project = self._project(record.text)
+            except IntakeRefused:
+                continue
+            if _development_request_text(record.text, project=project):
+                candidates.append((record.received_at, project, record))
+        # Requests naming different projects are ambiguous; the owner must restate one.
+        if not candidates or len({project for _, project, _ in candidates}) != 1:
+            raise IntakeRefused("explicit_authorized_project_required")
+        original = max(candidates, key=lambda candidate: candidate[0])[2]
+        # The answer is consumed; Hermes's status calls on this turn follow the original.
+        self._observed.pop(followup.message_id, None)
+        self._retired[followup.message_id] = followup.text_digest
+        self._status_turn = (followup.message_id, followup.text_digest,
+                             followup.space_digest, now, original.request_id)
+        return original
+
     def _require_active(self, event_id: str, digest: str) -> Observed:
         active = self._active
         if active is None or active.message_id != event_id or active.text_digest != digest:
@@ -425,11 +469,17 @@ class IntakeGate:
                 active = self._observed.get(event_id)
                 if active is None or active.text_digest != digest or event_id in self._retired:
                     raise IntakeRefused("unverified_event")
+                try:
+                    self._project(active.text)
+                except IntakeRefused as exc:
+                    if exc.code != "explicit_authorized_project_required":
+                        raise
+                    active = self._linked_request(active)
                 if not _development_request_text(active.text, project=self._project(active.text)):
                     raise IntakeRefused("not_development_request")
                 if self.clock() - active.received_at > MAX_EVENT_AGE:
-                    self._observed.pop(event_id, None)
-                    self._retired[event_id] = active.text_digest
+                    self._observed.pop(active.message_id, None)
+                    self._retired[active.message_id] = active.text_digest
                     raise IntakeRefused("expired_event")
                 try:
                     if Journal(self.gateway_dir / "journal.jsonl").outcomes_for(active.request_id):
@@ -449,7 +499,8 @@ class IntakeGate:
             if active.draft_digest and active.draft_digest != draft_digest:
                 raise IntakeRefused("request_conflict")
             if active.phase == "observed":
-                preview = _preview_text(active.text, draft, draft_digest, project=project)
+                preview = _preview_text(active.text, draft, draft_digest,
+                                        project=self._display_name(project))
                 active.draft_digest = draft_digest
                 active.envelope_data = data
                 active.phase = "previewing"
@@ -462,7 +513,7 @@ class IntakeGate:
                 except (OSError, ValueError, TimeoutError):
                     active.phase = "uncertain"
                     self._active = None
-                    self._retired[event_id] = digest
+                    self._retired[active.message_id] = active.text_digest
                     raise IntakeRefused("preview_unavailable") from None
                 active.preview_id = preview_id
                 active.preview_at = self.clock()
@@ -533,14 +584,18 @@ def _empty_draft() -> dict[str, str]:
 
 
 def _preview_text(utterance: str, draft: dict[str, Any], digest: str, *, project: str) -> str:
-    # Display every submitted field. The gate stores and later publishes the
-    # exact envelope bytes whose digest appears here; Hermes cannot revise it.
-    content = json.dumps({"original_request": utterance, "draft": draft},
-                         ensure_ascii=False, sort_keys=True, indent=2)
-    preview = (f"Development request preview for {project}\n" + content +
-               "\nSHA-256: " + digest +
-               "\nReply directly to this message with 'Yes, go ahead' within 5 minutes "
-               "to submit a proposed Gateway task. This does not approve execution.")
+    # Plain language for the owner (the only person on this line). The gate still
+    # stores and later publishes exactly the envelope bytes this preview was built
+    # from; Hermes cannot revise them after confirmation.
+    def line(value: object) -> str:
+        return " ".join(str(value).split())
+
+    preview = (f"Here's what I'll hand to the development team for {project}:\n"
+               f"{line(draft.get('title', ''))}\n"
+               f"Goal: {line(draft.get('objective', ''))}\n"
+               f"What changes: {line(draft.get('scope', ''))}\n"
+               f"Must do: {line(draft.get('requirements', ''))}\n"
+               'Is that right? Reply "yes" to this message in the next 5 minutes to start.')
     if len(preview) > MAX_PREVIEW:
         raise IntakeRefused("preview_too_large")
     return preview

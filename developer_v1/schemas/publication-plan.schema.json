@@ -19,7 +19,12 @@
     "cto_plan_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "development_grant_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "task_spec_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "status": {"const": "READY_FOR_OWNER_AUTHORIZATION"}
+    "status": {"const": "READY_FOR_OWNER_AUTHORIZATION"},
+    "review_findings": {"type": "array", "maxItems": 20, "items": {
+      "type": "object", "required": ["severity", "requirement", "detail", "evidence"],
+      "properties": {"severity": {"const": "info"}, "requirement": {"type": "string", "minLength": 1},
+                     "detail": {"type": "string", "minLength": 1}, "evidence": {"type": "string", "minLength": 1}},
+      "additionalProperties": false}}
   },
   "additionalProperties": false
 }

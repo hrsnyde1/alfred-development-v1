@@ -44,6 +44,35 @@ def once(directory, name, action):
     return result
 
 
+def reviewer_blocker(review) -> str | None:
+    """Why a recorded Reviewer result may not advance to draft PR preparation, or None.
+
+    Informational findings never block, but they also never override anything else:
+    the decision, correctness, scope and every acceptance criterion must all pass, and
+    any finding that is not exactly severity "info" (warning, error, critical, unknown,
+    missing or malformed) blocks.
+    """
+    if type(review) is not dict or review.get("decision") != "APPROVED":
+        return "independent Reviewer did not approve"
+    if (review.get("correctness") != "PASS" or review.get("scope") != "PASS"
+            or review.get("next_authorized_stage") != "github_draft_pr_preparation"):
+        return "independent Reviewer correctness or scope did not pass"
+    coverage = review.get("acceptance_coverage")
+    if (type(coverage) is not list or not coverage
+            or any(type(row) is not dict or row.get("result") != "PASS" for row in coverage)):
+        return "independent Reviewer acceptance criteria are not all PASS"
+    findings = review.get("findings")
+    if type(findings) is not list or any(
+        type(finding) is not dict
+        or finding.get("severity") != "info"
+        or any(type(finding.get(k)) is not str or not finding[k]
+               for k in ("requirement", "detail", "evidence"))
+        for finding in findings
+    ):
+        return "independent Reviewer findings require resolution"
+    return None
+
+
 def advance(directory: Path, job: dict, io):
     """Only this literal chain is permitted. No dynamic command/stage selection."""
     try:
@@ -65,14 +94,19 @@ def advance(directory: Path, job: dict, io):
         developed = once(directory, "developer", lambda: io.developer(job))
         if developed.get("state") != "ready_for_independent_qa":
             raise Held("developer did not produce a completed handoff")
-        qa = once(directory, "qa", lambda: io.qa(job))
+        if (directory / "qa.recovery.json").exists():
+            # Exactly one separately authorized incident recovery. No generic retry.
+            io.verify_qa_recovery(job)
+            qa = once(directory, "qa-recovery-1", lambda: io.qa(job))
+            io.verify_qa_recovery(job)
+        else:
+            qa = once(directory, "qa", lambda: io.qa(job))
         if qa.get("decision") != "PASS":
             raise Held("independent QA did not pass")
         review = once(directory, "reviewer", lambda: io.reviewer(job))
-        if review.get("decision") != "APPROVED":
-            raise Held("independent Reviewer did not approve")
-        if review.get("findings") != []:
-            raise Held("independent Reviewer findings require resolution")
+        blocker = reviewer_blocker(review)
+        if blocker:
+            raise Held(blocker)
         publication = once(
             directory, "publication-plan", lambda: io.publication_plan(job)
         )
@@ -80,6 +114,17 @@ def advance(directory: Path, job: dict, io):
         challenge = once(
             directory, "publication-challenge", lambda: io.publication_challenge(job)
         )
+        # An unanswered approval that expired is resent only when the owner ran
+        # `alfred-dev-ops resend` for it, once per authorization, never on its own.
+        n = 1
+        while io.publication_resend_authorized(job, n):
+            name = f"publication-challenge-resend-{n}"
+            if not (directory / (name + ".result.json")).exists() and not (
+                io.publication_expired(challenge["challenge"])
+            ):
+                break
+            challenge = once(directory, name, lambda: io.publication_challenge(job))
+            n += 1
         authorization = io.publication_authorization(job, challenge["challenge"])
         if authorization is None:
             return {"state": "awaiting_publication_approval"}

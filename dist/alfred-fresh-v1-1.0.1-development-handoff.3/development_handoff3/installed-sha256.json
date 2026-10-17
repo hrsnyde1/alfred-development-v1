@@ -1,0 +1,4 @@
+{
+  "/etc/systemd/system/alfred-development-evidence.service.d/40-fresh-v1.conf": "e88438ab00345eab461fedbb485a3f2a27bfd6a4d1bcb69c0343da01d08b7ed9",
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/host.py": "6a8e2e8f5c7749749bd7a139c068f3060cda67cddbf134e78d3f4b04dad61e53"
+}
