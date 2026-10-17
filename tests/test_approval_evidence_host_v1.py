@@ -44,8 +44,10 @@ class ApprovalEvidenceHostDelta(unittest.TestCase):
                      if name.is_file() and name.name != "HOST_ACCEPTANCE.md"
                      and (not (HISTORICAL / name.name).exists()
                           or (HISTORICAL / name.name).read_bytes() != name.read_bytes())}
+        # real_worker.py: handoff.6 accepts Codex progress notes before the final answer.
         self.assertEqual(different, {"pipeline.py", "owner_grants.py", "run_task.py", "publication_approval.py",
-                                    "trusted_intake_development.py", "stage_approval.py", "release.sha256"})
+                                    "trusted_intake_development.py", "stage_approval.py", "release.sha256",
+                                    "real_worker.py"})
         self.assertNotEqual(HISTORICAL.joinpath("trusted_intake_development.py").read_bytes(),
                             PACKAGE.joinpath("trusted_intake_development.py").read_bytes())
 

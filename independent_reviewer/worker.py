@@ -180,6 +180,14 @@ def verify_inputs(handoff_path: Path, qa_report_path: Path, final: Path,
             "model": config.get("model"), "final": final}
 
 
+def _decision_shaped(text: str) -> bool:
+    try:
+        value = json.loads(text)
+    except ValueError:
+        return False
+    return type(value) is dict and set(value) == {"decision", "findings", "coverage"}
+
+
 def review_with_model(context: dict) -> tuple[dict, dict]:
     choice = context["model"]
     require(type(choice) is dict and choice.get("provider") == "codex" and
@@ -216,8 +224,12 @@ def review_with_model(context: dict) -> tuple[dict, dict]:
             require(any(e.get("type") == "turn.completed" for e in events), "model", "Reviewer model did not complete")
             answers = [e["item"]["text"] for e in events if e.get("type") == "item.completed" and
                        e.get("item", {}).get("type") == "agent_message"]
-            require(len(answers) == 1, "model", "Reviewer model returned no single decision")
-            answer = json.loads(answers[0])
+            # Codex may send progress notes before its schema-bound final message.
+            # Exactly one message may carry a decision, and it must be the final one.
+            decided = [i for i, text in enumerate(answers) if _decision_shaped(text)]
+            require(len(decided) == 1 and decided[0] == len(answers) - 1,
+                    "model", "Reviewer model returned no single decision")
+            answer = json.loads(answers[-1])
         except (OSError, subprocess.TimeoutExpired, ValueError, IndexError) as exc:
             raise EvidenceError("model", f"Reviewer model unavailable or malformed: {type(exc).__name__}") from exc
     require(type(answer) is dict and set(answer) == {"decision", "findings", "coverage"} and
