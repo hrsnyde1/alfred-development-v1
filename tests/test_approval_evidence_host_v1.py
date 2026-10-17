@@ -46,9 +46,10 @@ class ApprovalEvidenceHostDelta(unittest.TestCase):
                           or (HISTORICAL / name.name).read_bytes() != name.read_bytes())}
         # real_worker.py: handoff.6 accepts Codex progress notes before the final answer.
         # team_skills.py: handoff.13 loads the owner-approved team skills for specialists.
+        # execution.py: handoff.15's claim scan reads only claim records.
         self.assertEqual(different, {"pipeline.py", "owner_grants.py", "run_task.py", "publication_approval.py",
                                     "trusted_intake_development.py", "stage_approval.py", "release.sha256",
-                                    "real_worker.py", "team_skills.py"})
+                                    "real_worker.py", "team_skills.py", "execution.py"})
         self.assertNotEqual(HISTORICAL.joinpath("trusted_intake_development.py").read_bytes(),
                             PACKAGE.joinpath("trusted_intake_development.py").read_bytes())
 

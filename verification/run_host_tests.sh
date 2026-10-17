@@ -97,6 +97,11 @@ run handoff12 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_multi_pro
 run handoff14 "$PYTHON" -B -m pytest -q -p no:cacheprovider \
   tests/test_development_handoff14_upgrade.py --junitxml="$OUT/handoff14.xml"
 
+# handoff.15: the team fixes its own work (up to three rounds); team skills alongside.
+run handoff15 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_fix_loop.py \
+  tests/test_development_handoff15_upgrade.py tests/test_team_skills.py \
+  tests/test_independent_qa.py --junitxml="$OUT/handoff15.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"

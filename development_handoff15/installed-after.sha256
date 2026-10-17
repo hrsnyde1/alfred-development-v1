@@ -1,0 +1,10 @@
+173e2acbfc07c670c7eb8b2eecfc5c385d89ca3df3ac72e99ed9fb4defe8be80  /usr/local/lib/alfred-fresh-v1/fresh_v1/host.py
+5c30519627b6c05906aa6d715d92209f5429af630e4e1873cfd17516a881ba0c  /usr/local/lib/alfred-fresh-v1/fresh_v1/role.py
+b9fbb0e9bf6e5ce68d0e2cddc2ff5dec74ce37a0892b76da93e3192af60efcae  /usr/local/lib/alfred-fresh-v1/fresh_v1/handoffs.py
+7932e0a44a465996d692fc431f5ed2645028b0440a3eb5b22f385bd581ec8ec6  /opt/alfred-developer-v1/developer_v1/pipeline.py
+167f6035beec65c440fe1bac6ec341a2e7ae8b40aff33ed344d5e06b47e98843  /opt/alfred-developer-v1/developer_v1/run_task.py
+5043fb42a6f017ec3561f7570aa1fb9997bed6f7dcbd284b8f9c9871bb254117  /opt/alfred-developer-v1/developer_v1/owner_grants.py
+b14d0162f61b9cc17d4b6fd06c1f5e2830c31803a43966198c59ced2f69288a7  /opt/alfred-developer-v1/developer_v1/execution.py
+50a5d0adca3967ec42bbd773d0fc53aee8e3a34a5ad977d155cba5d9c7c8f8c3  /opt/alfred-independent-qa-v1/independent_qa/worker.py
+0fed5b5d6bfb52fd8483e7352c29d8a7b400eeaa8a41ab2ad4e9bcc8f5987f43  /usr/local/lib/alfred-v1.1/trusted_intake.py
+0fed5b5d6bfb52fd8483e7352c29d8a7b400eeaa8a41ab2ad4e9bcc8f5987f43  /opt/alfred-developer-v1/developer_v1/trusted_intake_development.py

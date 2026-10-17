@@ -27,6 +27,51 @@ def write_once(path: Path, obj: dict):
         os.close(fd)
 
 
+MAX_FIX_ROUNDS = 3
+FINDING = 300
+
+
+def _line(text):
+    text = " ".join(str(text).split())
+    return text if len(text) <= FINDING else text[: FINDING - 1] + "…"
+
+
+def qa_findings(qa):
+    """What Independent QA found wrong, as short lines for the developers."""
+    lines = [
+        _line(f"{f.get('requirement')}: {f.get('detail')}")
+        for f in qa.get("findings") or []
+        if isinstance(f, dict) and f.get("severity") != "info"
+    ]
+    lines += [
+        _line(f"check {t.get('check') or t.get('name')} did not pass: "
+              f"{t.get('output_excerpt') or t.get('evidence') or t.get('result')}")
+        for t in qa.get("tests") or []
+        if isinstance(t, dict) and t.get("result") != "PASS"
+    ]
+    lines += [
+        _line(f"acceptance criterion not met: {c.get('criterion')}")
+        for c in qa.get("acceptance_criteria") or []
+        if isinstance(c, dict) and c.get("result") != "PASS"
+    ]
+    return lines[:12] or ["Independent QA did not pass; re-check every acceptance criterion."]
+
+
+def review_findings(review):
+    """What the independent Reviewer asked to change, as short lines."""
+    lines = [
+        _line(f"{f.get('requirement')}: {f.get('detail')}")
+        for f in review.get("findings") or []
+        if isinstance(f, dict) and f.get("severity") != "info"
+    ]
+    lines += [
+        _line(f"acceptance criterion not covered: {c.get('criterion')} ({c.get('evidence')})")
+        for c in review.get("acceptance_coverage") or []
+        if isinstance(c, dict) and c.get("result") != "PASS"
+    ]
+    return lines[:12] or ["The Reviewer did not approve; address correctness and scope."]
+
+
 def started(directory, name):
     """Whether this stage was ever attempted (its outcome then decides, never a retry)."""
     return any(
@@ -107,19 +152,44 @@ def advance(directory: Path, job: dict, io):
         developed = once(directory, "developer", lambda: io.developer(job))
         if developed.get("state") != "ready_for_independent_qa":
             raise Held("developer did not produce a completed handoff")
-        if (directory / "qa.recovery.json").exists():
-            # Exactly one separately authorized incident recovery. No generic retry.
-            io.verify_qa_recovery(job)
-            qa = once(directory, "qa-recovery-1", lambda: io.qa(job))
-            io.verify_qa_recovery(job)
-        else:
-            qa = once(directory, "qa", lambda: io.qa(job))
-        if qa.get("decision") != "PASS":
-            raise Held("independent QA did not pass")
-        review = once(directory, "reviewer", lambda: io.reviewer(job))
-        blocker = reviewer_blocker(review)
-        if blocker:
-            raise Held(blocker)
+        # Fix loop (owner's choice): when QA or the Reviewer finds problems, the same
+        # approved team redoes the work with those findings, up to MAX_FIX_ROUNDS.
+        # Plans made before multi-project support (no recorded specialists) keep the
+        # old behaviour: the first failed verdict holds the task.
+        loops = "specialists" in job
+        fix_round = 0
+        while True:
+            job["round"] = fix_round
+            if fix_round:
+                qa = once(directory, f"qa-fix-{fix_round}", lambda: io.qa(job))
+            elif (directory / "qa.recovery.json").exists():
+                # Exactly one separately authorized incident recovery. No generic retry.
+                io.verify_qa_recovery(job)
+                qa = once(directory, "qa-recovery-1", lambda: io.qa(job))
+                io.verify_qa_recovery(job)
+            else:
+                qa = once(directory, "qa", lambda: io.qa(job))
+            if qa.get("decision") != "PASS":
+                blocker, findings = "independent QA did not pass", qa_findings(qa)
+            else:
+                name = f"reviewer-fix-{fix_round}" if fix_round else "reviewer"
+                review = once(directory, name, lambda: io.reviewer(job))
+                blocker = reviewer_blocker(review)
+                if blocker is None:
+                    break
+                findings = review_findings(review)
+            if not loops:
+                raise Held(blocker)
+            if fix_round >= MAX_FIX_ROUNDS:
+                once(directory, "fix-rounds-exhausted",
+                     lambda: io.notify_stuck(job, findings))
+                raise Held("fix rounds exhausted; owner notified")
+            fix_round += 1
+            job["round"], job["fix_findings"] = fix_round, findings
+            developed = once(directory, f"developer-fix-{fix_round}",
+                             lambda: io.developer_fix(job))
+            if developed.get("state") != "ready_for_independent_qa":
+                raise Held("developer did not produce a completed handoff")
         publication = once(
             directory, "publication-plan", lambda: io.publication_plan(job)
         )

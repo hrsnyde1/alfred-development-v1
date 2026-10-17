@@ -156,6 +156,9 @@ class AssignmentStore:
                 raise Denied("duplicate dispatch")
             files = set(assignment["files"])
             for item in self.root.glob("*.json"):
+                # Only claim records; reports and QA inputs share this folder.
+                if item.name.startswith(("report-", "qa-input")):
+                    continue
                 prior = json.loads(item.read_text())
                 if prior["status"] == "running" and files & set(prior["files"]):
                     raise Denied("concurrent file ownership conflict")

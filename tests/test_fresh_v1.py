@@ -402,7 +402,7 @@ class World(host.Host):
             SIDE,
         )
 
-    def worker(self, job, stage, user):
+    def worker(self, job, stage, user, fix_round=0):
         self.guard()
         self.dispatched = True  # As Host.worker, immediately before the role starts.
         self.calls.append((stage, user))
@@ -419,9 +419,14 @@ class World(host.Host):
             )
 
         def independent_model(config, context):
+            decision = (
+                self.qa_decision.pop(0)
+                if isinstance(self.qa_decision, list)
+                else self.qa_decision
+            )
             findings = (
                 []
-                if self.qa_decision == "PASS"
+                if decision == "PASS"
                 else [
                     {
                         "severity": "high",
@@ -434,7 +439,11 @@ class World(host.Host):
 
         def review_model(context):
             answer, used = model_answer(context)
-            answer["decision"] = self.review_decision
+            answer["decision"] = (
+                self.review_decision.pop(0)
+                if isinstance(self.review_decision, list)
+                else self.review_decision
+            )
             answer["findings"] = list(getattr(self, "review_findings", []))
             return answer, used
 
@@ -523,6 +532,7 @@ class World(host.Host):
                             str(self.jobdir(job)),
                             "--policy",
                             str(self.policy_path),
+                            *(["--round", str(fix_round)] if fix_round else []),
                         ]
                     )
                 except Exception as exc:
@@ -605,9 +615,13 @@ def test_failed_independent_stage_stops_publication(world, stage, decision):
     world.approve_development()
     setattr(world, stage.replace("reviewer", "review") + "_decision", decision)
     result = world.tick()
-    assert result["state"] == "held", result
+    # Every automatic fix round failed too: nothing is published, and the owner
+    # gets one plain-language text instead of a publication approval.
+    assert result == {"state": "held", "reason": "fix rounds exhausted; owner notified"}
     assert not world.pushes and not world.notifications
-    assert len(world.messages) == 2
+    assert len(world.messages) == 3
+    assert world.messages[-1][1].startswith("I couldn't finish this one:")
+    assert "Approve GitHub Draft PR" not in world.messages[-1][1]
 
 
 def test_uncertain_completion_never_retries_after_restart(world):
