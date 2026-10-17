@@ -226,3 +226,142 @@ def test_recovered_qa_attempt_without_result_is_held(host, capsys):
     write(directory / "qa-recovery-1.attempt.json", {"stage": "qa-recovery-1"})
     result = report(policy, capsys, code=2)
     assert result["gates"]["qa_pass_with_model"]["verdict"] == "HELD"
+
+
+@pytest.fixture
+def refusal_host(host, tmp_path):
+    policy, directory, grants, gateway = host
+    repository, completion = tmp_path / "repo", tmp_path / "completion"
+    write(repository / ".dev/tasks/T-0002-done.md", {"task": "T-0002"})
+    completion.mkdir()
+    value = json.loads(policy.read_text())
+    write(
+        policy,
+        {**value, "repository": str(repository), "completion_state": str(completion)},
+    )
+    complete_run(directory, grants)
+    write(gateway / "journal.jsonl", {"event": "filed"})
+    (gateway / "PAUSE").write_text("")
+    return policy, repository, grants, gateway
+
+
+def save_snapshot(policy, capsys, tmp_path):
+    assert capture.main(["--snapshot", "--policy", str(policy)]) == 0
+    out = capsys.readouterr().out
+    assert SECRET not in out
+    baseline = tmp_path / "before.json"
+    baseline.write_text(out)
+    return baseline
+
+
+def since(policy, baseline, capsys, code):
+    assert capture.main(["--since", str(baseline), "--policy", str(policy)]) == code
+    out = capsys.readouterr().out
+    assert SECRET not in out
+    return json.loads(out)
+
+
+def test_refusal_with_no_new_authority_is_unchanged(refusal_host, capsys, tmp_path):
+    policy, _, grants, gateway = refusal_host
+    baseline = save_snapshot(policy, capsys, tmp_path)
+    # A refused request may log context, never authority.
+    with open(gateway / "journal.jsonl", "a") as stream:
+        stream.write('{"event": "rejected"}\n')
+    write(grants / "request-route-r9.json", {"state": "refused"})
+    result = since(policy, baseline, capsys, 0)
+    assert result["overall"] == "UNCHANGED" and result["authority"] == {}
+    assert result["context"]["gateway_state"]["changed"] == ["journal.jsonl"]
+    assert result["context"]["grant_root"]["added"] == ["request-route-r9.json"]
+
+
+@pytest.mark.parametrize(
+    "mutate,section,kind,name",
+    [
+        (lambda r, g, s: write(r / ".dev/tasks/T-0004-x.md", {}), "tasks", "added",
+         "T-0004-x.md"),
+        (lambda r, g, s: write(g / "grant-ref-9.json", {}), "grants", "added",
+         "grant-ref-9.json"),
+        (lambda r, g, s: write(g / "publication-decision-p.json", {}), "grants",
+         "added", "publication-decision-p.json"),
+        (lambda r, g, s: write(s / "cto-plans/dev-v1-accept-T-0004.json", {}),
+         "cto_plans", "added", "cto-plans/dev-v1-accept-T-0004.json"),
+        (lambda r, g, s: (g / "grant-ref-1.json").unlink(), "grants", "removed",
+         "grant-ref-1.json"),
+    ],
+)
+def test_new_or_altered_authority_is_changed(
+    refusal_host, capsys, tmp_path, mutate, section, kind, name
+):
+    policy, repository, grants, gateway = refusal_host
+    baseline = save_snapshot(policy, capsys, tmp_path)
+    mutate(repository, grants, gateway)
+    result = since(policy, baseline, capsys, 2)
+    assert result["overall"] == "CHANGED"
+    assert result["authority"][section][kind] == [name]
+
+
+def test_new_job_stage_is_changed(refusal_host, capsys, tmp_path):
+    policy, *_ = refusal_host
+    baseline = save_snapshot(policy, capsys, tmp_path)
+    jobs = Path(json.loads(policy.read_text())["jobs"]) / "dev-v1-accept"
+    write(jobs / "T-0005" / "job.json", {"task_id": "T-0005"})
+    write(jobs / TASK / "qa.result.json", {"decision": "FAIL"})
+    result = since(policy, baseline, capsys, 2)
+    assert result["authority"]["jobs"]["added"] == ["T-0005/job.json"]
+    assert result["authority"]["jobs"]["changed"] == [f"{TASK}/qa.result.json"]
+
+
+def test_snapshot_symlink_is_recorded_not_followed(refusal_host, capsys, tmp_path):
+    policy, _, grants, _ = refusal_host
+    baseline = save_snapshot(policy, capsys, tmp_path)
+    outside = tmp_path / "outside.json"
+    write(outside, {"secret": SECRET})
+    os.symlink(outside, grants / "grant-ref-7.json")
+    result = since(policy, baseline, capsys, 2)
+    assert result["authority"]["grants"]["added"] == ["grant-ref-7.json"]
+
+
+def test_since_rejects_non_snapshot_baseline(refusal_host, capsys, tmp_path):
+    policy, *_ = refusal_host
+    bogus = tmp_path / "bogus.json"
+    write(bogus, {"schema": "something-else"})
+    assert capture.main(["--since", str(bogus), "--policy", str(policy)]) == 1
+    assert json.loads(capsys.readouterr().out)["overall"] == "UNAVAILABLE"
+
+
+def test_snapshot_and_since_never_write(refusal_host, capsys, tmp_path):
+    policy, *_ = refusal_host
+    baseline = save_snapshot(policy, capsys, tmp_path)
+    state = {
+        p: (p.read_bytes(), p.stat().st_mtime_ns)
+        for p in tmp_path.rglob("*")
+        if p.is_file() and not p.is_symlink()
+    }
+    since(policy, baseline, capsys, 0)
+    assert capture.main(["--snapshot", "--policy", str(policy)]) == 0
+    capsys.readouterr()
+    after = {
+        p: (p.read_bytes(), p.stat().st_mtime_ns)
+        for p in tmp_path.rglob("*")
+        if p.is_file() and not p.is_symlink()
+    }
+    assert state == after
+
+
+def test_task_and_snapshot_modes_are_exclusive(host):
+    policy, *_ = host
+    with pytest.raises(SystemExit):
+        capture.main(["--task", TASK, "--snapshot", "--policy", str(policy)])
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads mode-000 directories")
+def test_unreadable_directory_is_refused_not_skipped(refusal_host, capsys, tmp_path):
+    policy, _, grants, _ = refusal_host
+    hidden = grants / "private"
+    hidden.mkdir()
+    hidden.chmod(0)
+    try:
+        assert capture.main(["--snapshot", "--policy", str(policy)]) == 1
+        assert json.loads(capsys.readouterr().out)["overall"] == "UNAVAILABLE"
+    finally:
+        hidden.chmod(0o700)

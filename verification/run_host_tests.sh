@@ -93,9 +93,10 @@ run handoff11 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_plain_lan
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"
 
-# 5. Evidence capture script (this bundle's own read-only tool).
+# 5. This bundle's own read-only tools: Phase D evidence and Gate 7 snapshots, and
+#    the Gate 5 post-restart check.
 run evidence-capture "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_capture_evidence.py \
-  --junitxml="$OUT/evidence-capture.xml"
+  tests/test_post_restart_check.py --junitxml="$OUT/evidence-capture.xml"
 
 # 6. Photon development observer (in-process, no socket or SDK connection).
 run node-observer "$NODE" --test --test-reporter=tap --experimental-test-isolation=none \
