@@ -44,6 +44,11 @@ run phase-a-and-installer "$PYTHON" -B -m pytest -q -p no:cacheprovider \
   tests/test_phase_a_continuation.py tests/test_development_handoff_upgrade.py \
   tests/test_handoff_dependency_owner_contract.py --junitxml="$OUT/phase-a-and-installer.xml"
 
+# 3b. handoff.3: Evidence sandbox write paths, recorded-failure skip, two-file installer.
+run handoff3 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_evidence_sandbox_paths.py \
+  tests/test_development_handoff3_upgrade.py tests/test_development_challenge_delivery.py \
+  --junitxml="$OUT/handoff3.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"

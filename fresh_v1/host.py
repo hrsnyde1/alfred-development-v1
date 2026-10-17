@@ -712,6 +712,7 @@ def poll(policy_path=POLICY):
         # T-0001/T-0002 without this record are never adopted or modified.
         journal = Path(policy["gateway_state"]) / "journal.jsonl"
         held_challenge = False
+        held_failure = None
         for line in read_owned(journal, host.uids["alfred"]).splitlines():
             row = json.loads(line)
             if (
@@ -776,10 +777,21 @@ def poll(policy_path=POLICY):
                 # genuine owner request; no old evidence is modified/adopted.
                 held_challenge = True
                 continue
+            failed = sorted(directory.glob("*.failure.json"))
+            if failed:
+                # A worker reported a definite failure and the stage is held for
+                # good. Like the uncertain send above, never revisit it and never
+                # let it starve a later genuine owner request; nothing is modified.
+                held_failure = held_failure or failed[0].name.removesuffix(
+                    ".failure.json"
+                )
+                continue
             result = advance(directory, job, host)
             if result["state"] == "complete":
                 write_once(directory / "complete.json", result)
             return result  # One bounded fresh task per existing timer tick.
+        if held_failure:
+            return {"state": "held", "reason": held_failure + ": recorded failure; task held"}
         return ({"state": "held", "reason": "development-challenge: previous attempt requires reconciliation"}
                 if held_challenge else {"state": "idle"})
     finally:

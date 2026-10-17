@@ -633,3 +633,80 @@ def test_existing_poll_skips_only_the_uncertain_challenge_without_mutating_it(
         assert (
             world.repo / ".dev/tasks" / (name + "-historical.md")
         ).read_text() == "preserve " + name
+
+
+def held_at_developer(world, *, failure):
+    """The host's T-0004 shape: approved, then a Developer attempt that either
+    recorded definite failure evidence or was interrupted with none."""
+    world.submit()
+    old = world.jobdir(world.job)
+    write_once(old / "plan.result.json", world.plan(world.job))
+    write_once(old / "development-challenge.attempt.json", {"stage": "development-challenge"})
+    write_once(old / "development-challenge.result.json", {"challenge": "expired-ref"})
+    write_once(old / "developer.attempt.json", {"stage": "developer"})
+    if failure:
+        write_once(
+            old / "developer.failure.json",
+            {"stage": "developer", "phase": "python", "category": "read_only_filesystem"},
+        )
+    return old
+
+
+def poll_once(world):
+    """One real host.poll tick. The old job's grant is reported present, so only the
+    held Developer stage (never the approval wait) can stop it."""
+    save(world.gateway.gateway_dir / "v1-1-intake.json", {"owner_sender_id": OWNER})
+    with (
+        patch.object(host, "require_root"),
+        patch.object(host, "root_directory"),
+        patch.object(
+            host,
+            "protected_json",
+            lambda p: protected_json(
+                p, trusted_uid=os.geteuid(), trusted_root=world.root
+            ),
+        ),
+        patch.object(host, "Host", return_value=world),
+        patch.object(host.pwd, "getpwnam", return_value=SimpleNamespace(pw_uid=SIDE)),
+        patch.object(world, "development_grant", return_value={"reference": "expired-ref"}),
+        patch.object(world, "developer", side_effect=AssertionError("developer rerun")),
+        patch.object(world, "plan", wraps=world.plan) as plan,
+    ):
+        return host.poll(world.policy_path), plan
+
+
+@pytest.mark.parametrize("new_request", [False, True])
+def test_existing_poll_skips_a_recorded_stage_failure_without_mutating_it(
+    world, new_request
+):
+    old = held_at_developer(world, failure=True)
+    before = {p.name: p.read_bytes() for p in old.iterdir() if p.is_file()}
+    if new_request:
+        assert world.submit(identifier="new-owner-request") == "T-0004"
+    result, plan = poll_once(world)
+    if new_request:
+        # The later request advances; with the grant mocked present it reaches the
+        # (asserting) Developer only for T-0004, never for the held task.
+        assert plan.call_count == 1 and plan.call_args.args[0]["task_id"] == "T-0004"
+    else:
+        assert result == {
+            "state": "held",
+            "reason": "developer: recorded failure; task held",
+        }
+        plan.assert_not_called()
+    assert before == {p.name: p.read_bytes() for p in old.iterdir() if p.is_file()}
+
+
+def test_uncertain_stage_without_failure_evidence_still_blocks(world):
+    # Only definite, recorded failures are skipped; an interrupted attempt with no
+    # evidence still requires reconciliation before anything later runs.
+    old = held_at_developer(world, failure=False)
+    before = {p.name: p.read_bytes() for p in old.iterdir() if p.is_file()}
+    assert world.submit(identifier="new-owner-request") == "T-0004"
+    result, plan = poll_once(world)
+    assert result == {
+        "state": "held",
+        "reason": "developer: previous attempt requires reconciliation",
+    }
+    plan.assert_not_called()
+    assert before == {p.name: p.read_bytes() for p in old.iterdir() if p.is_file()}
