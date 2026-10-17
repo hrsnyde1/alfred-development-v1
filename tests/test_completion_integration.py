@@ -120,29 +120,27 @@ def test_actual_publisher_schema_matches_bundled_schema():
 
 def test_merged_owner_wording_requires_both_readback_and_attestation(world):
     text = world["run"]()["text"]
-    assert "successfully created Draft PR #1" in text
-    assert (
-        "You subsequently merged it as hrsnyde1 in a separate authorized owner action"
-        in text
-    )
-    assert "awaiting owner review" not in text
-    assert "Deployment has not been verified" in text
+    assert "You merged it on GitHub" in text
+    assert "draft for your review" not in text
+    assert "isn't live until it's deployed" in text
     world["factory"].assert_not_called()
     world["config"]["owner_merge_attested"] = False
     world["save"]()
-    assert "authorized owner action" not in world["run"]()["text"]
+    text = world["run"]()["text"]
+    assert "You merged it" not in text and "merged by hrsnyde1" in text
     world["config"]["owner_merge_attested"] = True
     world["pr"]["merged_by"]["login"] = "another-owner"
     world["save"]()
-    assert "authorized owner action" not in world["run"]()["text"]
+    text = world["run"]()["text"]
+    assert "You merged it" not in text and "merged by another-owner" in text
 
 
 @pytest.mark.parametrize(
     "state,draft,expected",
     [
-        ("open", True, "remains a draft awaiting owner review"),
-        ("open", False, "open and ready for review"),
-        ("closed", False, "closed without a recorded merge"),
+        ("open", True, "as a draft for your review. Nothing is live yet"),
+        ("open", False, "ready for your review. Nothing is live yet"),
+        ("closed", False, "closed without merging"),
     ],
 )
 def test_current_pr_status_controls_wording(world, state, draft, expected):

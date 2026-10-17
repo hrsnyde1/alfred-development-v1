@@ -1,0 +1,9 @@
+{
+  "/usr/local/lib/alfred-v1.1/trusted_intake.py": "883a779f82f760777d59761abd1b9125f61ce4522b184936d146d234f5149952",
+  "/opt/alfred-developer-v1/developer_v1/trusted_intake_development.py": "883a779f82f760777d59761abd1b9125f61ce4522b184936d146d234f5149952",
+  "/opt/alfred-developer-v1/developer_v1/publication_approval.py": "3c5033c7f2d54e199cc2b7b9a39a680387966bd9b7bcafb100a8756f23ad1257",
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/handoffs.py": "46045d3a67b6f2eaf8be8a1202db86b1032f3f53ba81a7bfd1adfa79a000204d",
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/host.py": "a287b682ffb6cc761df2adde7cb781b9e4278d154ec8c1ec05b33969bf3abf02",
+  "/usr/local/lib/alfred-completion-v1/completion_integration/completion.py": "24340918bf0331b127a99475286150545fb20fca1d5972887014cbe1374c325f",
+  "/usr/local/sbin/alfred-dev-ops": "3c4d70877793358f403092fc5f06a2b4ea70103a21bbf830dc017cc2b69c223b"
+}

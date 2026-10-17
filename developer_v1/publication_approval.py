@@ -53,6 +53,57 @@ def _notes_text(notes: tuple[tuple[str, str], ...]) -> str:
     return "Reviewer notes (informational, non-blocking):\n" + "\n".join(lines) + "\n"
 
 
+# From handoff.11 the owner (the only person on this Photon line) approves in plain
+# language: reply "yes" in the approval message's own thread within 12 hours. The
+# native in-thread reply target, the owner's number, the same DM, no forwarding and
+# single use bind the exact sealed plan; the technical binding stays in the receipt.
+# Receipts issued earlier keep their 5-minute exact-phrase wording and still verify.
+SIMPLE_MAX_AGE = 12 * 3600
+SIMPLE_REPLIES = ("yes", "y", "approve", "approved", "publish", "yes publish", "go ahead",
+                  "yes go ahead")
+SUMMARY_MAX = 300
+
+
+def _normalized(text: str) -> str:
+    return " ".join(text.casefold().replace(",", " ").split()).rstrip(".!")
+
+
+def _reply_digest(text: str, reference: str, bound: dict, simple: bool) -> str | None:
+    """The digest recorded for an accepted reply, or None when it is not an approval."""
+    if text == _phrase(reference, bound):
+        return _digest(text.encode())
+    normalized = _normalized(text)
+    return _digest(normalized.encode()) if simple and normalized in SIMPLE_REPLIES else None
+
+
+def _lifetime(receipt: dict) -> int | None:
+    issued, expires = receipt.get("issued_at"), receipt.get("expires_at")
+    if type(issued) not in (int, float) or type(expires) not in (int, float):
+        return None
+    for lifetime in (MAX_AGE, SIMPLE_MAX_AGE):
+        if expires == issued + lifetime:
+            return lifetime
+    return None
+
+
+def _summary(value: object) -> str:
+    """One plain-language line describing the work, e.g. "Add dark mode (SC Products)"."""
+    if type(value) is not str:
+        raise Denied("publication summary invalid")
+    text = " ".join(value.split())
+    if not text:
+        raise Denied("publication summary invalid")
+    return text if len(text) <= SUMMARY_MAX else text[:SUMMARY_MAX - 1] + "…"
+
+
+def _simple_text(summary: str, notes: tuple[tuple[str, str], ...]) -> str:
+    return (f"Ready to publish: {summary}\n"
+            "It passed testing and an independent review.\n"
+            + _notes_text(notes) +
+            'Reply "yes" to this message to put it on GitHub as a draft for your review. '
+            "Nothing goes live without you.")
+
+
 def _challenge_text(reference: str, bound: dict | None = None, plan_sha: str | None = None,
                     notes: tuple[tuple[str, str], ...] = ()) -> str:
     bound = BOUND if bound is None else bound
@@ -84,9 +135,10 @@ def _check_receipt(receipt: dict, reference: str, bound: dict | None = None, pla
                    notes: tuple[tuple[str, str], ...] = ()) -> None:
     bound = BOUND if bound is None else bound
     plan_sha = PLAN_SHA if plan_sha is None else plan_sha
-    if (set(receipt) != {"schema", "reference", "plan_sha256", *BOUND,
-                         "owner_id", "space_id", "message_id", "issued_at",
-                         "expires_at", "challenge_text_sha256", "phrase_sha256"}
+    simple = _lifetime(receipt) == SIMPLE_MAX_AGE
+    fields = {"schema", "reference", "plan_sha256", *BOUND, "owner_id", "space_id",
+              "message_id", "issued_at", "expires_at", "challenge_text_sha256", "phrase_sha256"}
+    if (set(receipt) != (fields | {"summary"} if simple else fields)
             or receipt.get("schema") != "alfred.publication-challenge/1"
             or receipt.get("reference") != reference
             or receipt.get("plan_sha256") != plan_sha
@@ -94,9 +146,11 @@ def _check_receipt(receipt: dict, reference: str, bound: dict | None = None, pla
             or not isinstance(receipt.get("owner_id"), str) or not receipt["owner_id"]
             or not isinstance(receipt.get("space_id"), str) or not receipt["space_id"]
             or not isinstance(receipt.get("message_id"), str) or not receipt["message_id"]
-            or type(receipt.get("issued_at")) not in (int, float)
-            or receipt.get("expires_at") != receipt["issued_at"] + MAX_AGE
-            or receipt.get("challenge_text_sha256") != _digest(_challenge_text(reference, bound, plan_sha, notes).encode())
+            or _lifetime(receipt) is None
+            or (simple and receipt.get("summary") != _summary(receipt.get("summary")))
+            or receipt.get("challenge_text_sha256") != _digest((
+                _simple_text(receipt["summary"], notes) if simple
+                else _challenge_text(reference, bound, plan_sha, notes)).encode())
             or receipt.get("phrase_sha256") != _digest(_phrase(reference, bound).encode())):
         raise Denied("publication challenge receipt invalid")
 
@@ -122,7 +176,10 @@ def _check_decision(receipt: dict, decision: dict, reference: str) -> None:
             or decision.get("native_reply_target") != receipt["message_id"]
             or decision.get("is_forward") is not False
             or decision.get("content_type") != "text"
-            or decision.get("content_sha256") != receipt["phrase_sha256"]
+            or decision.get("content_sha256") not in (
+                {receipt["phrase_sha256"]} | (
+                    {_digest(reply.encode()) for reply in SIMPLE_REPLIES}
+                    if _lifetime(receipt) == SIMPLE_MAX_AGE else set()))
             or decision.get("checks") != checks
             or type(decision.get("accepted_at")) not in (int, float)
             or not receipt["issued_at"] <= decision["accepted_at"] <= receipt["expires_at"]
@@ -171,17 +228,19 @@ class PublicationApprovalIssuer:
             raise Denied("protected publication evidence unavailable") from exc
         return self._context(raw)
 
-    def stage(self, plan_raw: bytes, *, space_id: str, peer_uid: int) -> dict:
+    def stage(self, plan_raw: bytes, *, space_id: str, peer_uid: int,
+              summary: object = None) -> dict:
+        """With a summary, the owner gets the plain-language 12-hour "yes" approval."""
         if peer_uid != self.admin_uid or type(space_id) is not str or not space_id:
             raise Denied("publication staging requires administrator and DM")
         bound, plan_sha, notes = self._context(plan_raw)
+        summary = None if summary is None else _summary(summary)
         with self._lock:
             for path in self.root.glob("publication-pending-*.json"):
-                pending = _read(self.root, path.name)
                 reference = path.stem.removeprefix("publication-pending-")
-                if self.clock() <= pending["created_at"] + MAX_AGE:
-                    raise Denied("publication challenge already pending")
                 receipt = _read(self.root, f"publication-challenge-{reference}.json")
+                if self.clock() <= receipt["expires_at"]:
+                    raise Denied("publication challenge already pending")
                 _write_once(self.root, f"publication-expired-{reference}.json", {
                     "schema": "alfred.publication-challenge-expiry/1", "reference": reference,
                     "challenge_sha256": _digest(receipt), "expired_at": self.clock()})
@@ -192,7 +251,8 @@ class PublicationApprovalIssuer:
                 if previous.get("plan_sha256") == plan_sha:
                     raise Denied("publication decision already exists for this plan")
             reference = uuid.uuid4().hex
-            message = _challenge_text(reference, bound, plan_sha, notes)
+            message = (_challenge_text(reference, bound, plan_sha, notes) if summary is None
+                       else _simple_text(summary, notes))
             message_id = self.send(space_id, message)
             if type(message_id) is not str or not message_id:
                 raise Denied("publication challenge delivery unverified")
@@ -200,9 +260,11 @@ class PublicationApprovalIssuer:
             receipt = {"schema": "alfred.publication-challenge/1", "reference": reference,
                        "plan_sha256": plan_sha, **bound, "owner_id": self.owner,
                        "space_id": space_id, "message_id": message_id,
-                       "issued_at": now, "expires_at": now + MAX_AGE,
+                       "issued_at": now,
+                       "expires_at": now + (MAX_AGE if summary is None else SIMPLE_MAX_AGE),
                        "challenge_text_sha256": _digest(message.encode()),
-                       "phrase_sha256": _digest(_phrase(reference, bound).encode())}
+                       "phrase_sha256": _digest(_phrase(reference, bound).encode()),
+                       **({} if summary is None else {"summary": summary})}
             _write_once(self.root, f"publication-challenge-{reference}.json", receipt)
             _write_once(self.root, f"publication-pending-{reference}.json", {
                 "message_id": message_id, "space_id": space_id,
@@ -243,6 +305,9 @@ class PublicationApprovalIssuer:
             timestamp = _event_time(event.get("timestamp"))
             content = event.get("content")
             event_id = event.get("messageId")
+            reply = (_reply_digest(content["text"], reference, bound,
+                                   _lifetime(receipt) == SIMPLE_MAX_AGE)
+                     if type(content) is dict and type(content.get("text")) is str else None)
             if (event.get("direction") != "inbound"
                     or event.get("sender") != {"id": self.owner}
                     or event.get("space") != {"id": receipt["space_id"], "type": "dm"}
@@ -250,7 +315,7 @@ class PublicationApprovalIssuer:
                     or type(event_id) is not str or not 1 <= len(event_id) <= 200
                     or event_id == target
                     or type(content) is not dict or content.get("type") != "text"
-                    or content.get("text") != _phrase(reference, bound)
+                    or reply is None
                     or not receipt["issued_at"] <= now <= receipt["expires_at"]
                     or not receipt["issued_at"] <= timestamp <= now + 5):
                 raise Denied("publication owner reply unverified")
@@ -263,7 +328,7 @@ class PublicationApprovalIssuer:
                         "owner_event_id": event_id, "sender_id": self.owner,
                         "space_id": receipt["space_id"], "direction": "inbound",
                         "native_reply_target": target, "is_forward": False,
-                        "content_type": "text", "content_sha256": _digest(content["text"].encode()),
+                        "content_type": "text", "content_sha256": reply,
                         "sdk_event_timestamp": timestamp, "accepted_at": now,
                         "peer_uid": peer_uid,
                         "checks": {"authenticated_sender": True, "same_dm": True,
