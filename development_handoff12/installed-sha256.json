@@ -1,0 +1,10 @@
+{
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/host.py": "d11ed1c414bd260bd94029f7bf038ba0b865ba1e2596ffae49abe7cd6422a732",
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/role.py": "3c2c3968cb858e4469ce11e82dd2bbfd7f61ea43f9dcc783145cbf21f524a688",
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/handoffs.py": "411011e6a6d809601581dae712c6951d082202f04427061367c448ad31c2d0c1",
+  "/usr/local/lib/alfred-v1.1/trusted_intake.py": "fee67e01c6bdc2017c7bf8d8e2dfeee4f1301577f51a63aa99cd00ec826953f7",
+  "/opt/alfred-developer-v1/developer_v1/trusted_intake_development.py": "fee67e01c6bdc2017c7bf8d8e2dfeee4f1301577f51a63aa99cd00ec826953f7",
+  "/opt/alfred-independent-qa-v1/independent_qa/config.json": "4ae4bd9a6c71a907706cb3a415d72763243fb03aa2e1862449d5f94a332197e5",
+  "/etc/alfred-development/delegation.json": "25f09e3b28b0b50e36a3cd8f85558833e01a576615a549e051fddd1a4579c5ca",
+  "/etc/alfred-fresh-v1/policy.json": null
+}

@@ -6,6 +6,9 @@
       {"contains": "add(7, 3)", "check": "calculator_examples"},
       {"contains": "subtract(7, 3)", "check": "calculator_examples"},
       {"contains": "unittest", "check": "python_unittest"}
+    ]},
+    "demo-site": {"checks": ["python_unittest"], "criteria": [
+      {"contains": "unittest", "check": "python_unittest"}
     ]}
   }
 }

@@ -139,14 +139,15 @@ def prepare_plan(job, policy, *, remote_main=None, fetch=True):
             evidence = cto._repo_evidence(snapshot, name)
         plan = cto._central_cto(spec, repo, evidence, hashlib.sha256(raw).hexdigest())
         plan["baseline_revision"] = remote_main
-        scope = [
-            p
-            for p in policy["allowed_scope"]
-            if p in plan["scope"] and p in evidence["files"]
-        ]
+        present = [p for p in policy["allowed_scope"] if p in evidence["files"]]
+        # Files the request names, else every allowed file the repository has (a
+        # plain-language request such as "add dark mode" names none).
+        # Sorted, exactly as the development approval binds it.
+        scope = sorted([p for p in present if p in plan["scope"]] or present)
+        specialists = select_specialists(spec, plan)
         if (
             not scope
-            or select_specialists(spec, plan) != policy["specialists"]
+            or not set(specialists) <= set(policy["specialists"])
             or plan["clarification_required"]
         ):
             raise ValueError("scope or specialist requires clarification")
@@ -168,6 +169,7 @@ def prepare_plan(job, policy, *, remote_main=None, fetch=True):
             "baseline_revision": remote_main,
             "plan_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
             "spec_path": str(repo / ".dev/tasks" / name),
+            "specialists": specialists,
         }
 
 
