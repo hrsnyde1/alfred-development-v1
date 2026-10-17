@@ -1,5 +1,14 @@
 # First live Backend Developer acceptance
 
+> **Status, 2026-10-17: historical.** This runbook prepared the first
+> operator-fixture acceptance, and that has since run. `dev-v1-accept` is in the
+> production registry (`projects.yaml` now equals `projects.proposed.yaml`, so the
+> baseline `cmp` below fails, as expected). T-0002 reached a draft PR, which was
+> merged on GitHub as `596d91d`. T-0003 (`multiply`) is held and must not be
+> touched. `verify_preparation.py` now predicts T-0004. For the remaining live
+> gates, use [verification/PHASE_D_CHECKLIST.md](../verification/PHASE_D_CHECKLIST.md)
+> from the merged checkout `/home/alfred/alfred-development-v1`.
+
 This is a preparation and future operator runbook. No live task has been filed,
 no iMessage sent, no development grant issued, and no developer invoked.
 

@@ -11,20 +11,47 @@ authorization. Nothing here authorizes a gate.
 | 2 | Review and merge alfred-development-v1#1 (handoff.2) | Hayden | PR merged; the host checkout is at the merged revision |
 | 3 | Phase A preparation | root | Prepare script ends `PHASE_A_PREPARED_HELD` |
 | 4 | Phase B file installation | root | `INSTALLED_HELD`, then `HOST.md` §4 hash checks pass |
-| 5 | Phase C restart (Intake + Photon + Hermes) | root | All three units active; an ordinary Alfred chat works |
+| 5 | Phase C restart (Intake + Photon + Hermes) | root, then alfred | `post_restart_check.py` reports `"overall": "PASS"`; an ordinary Alfred chat works |
 | 6 | Live happy path (below) | Hayden's iPhone + root | `capture_evidence.py` reports `"overall": "PASS"` |
-| 7 | Live refusals (below) | Hayden's iPhone (+ one other sender) | Each refused; no new task, grant or PR |
+| 7 | Live refusals (below) | Hayden's iPhone (+ one other sender) | Each refused; `capture_evidence.py --since` reports `UNCHANGED` |
 | 8 | Second task | Hayden's iPhone | A different request also reaches `PASS`, with no reset |
 
 ## Gate 1: run as alfred on the host
 
 ```bash
-cd /home/alfred/alfred-development-lab/milestone2/task-a
+cd /home/alfred/alfred-development-v1
 bash verification/run_host_tests.sh
 ```
 
 Paste back the final summary lines. Do **not** paste the `results/` logs into a
 public place.
+
+## Gate 5: after the Phase C restart, as alfred
+
+Run every command in this checklist from the merged checkout,
+`/home/alfred/alfred-development-v1`. The older
+`/home/alfred/alfred-development-lab/milestone2/task-a` staging copy is behind
+`main` and lacks these tools.
+
+```bash
+cd /home/alfred/alfred-development-v1
+/usr/bin/python3 -I -B verification/post_restart_check.py
+```
+
+`PASS` means:
+- the seven Phase B files still carry their installed digests;
+- Intake, Photon and Hermes are running and started after the install, so the
+  new code is loaded;
+- there have been no automatic restarts and no error-priority journal lines
+  since each start;
+- PAUSE is present and STOP is absent.
+
+Other results:
+- `NOT_RESTARTED`: at least one unit is still running pre-install code.
+- `FAIL`: the report names the unit or file.
+
+The script prints only counts, never log text. Then send Alfred an ordinary,
+non-development message and confirm the reply.
 
 ## Gate 6: live happy path
 
@@ -35,8 +62,14 @@ Before you start:
 
 Example text to Alfred:
 
-> For dev-v1-accept: add a multiply(a, b) helper to calculator.py that returns a times b,
+> For dev-v1-accept: add a power(a, b) helper to calculator.py that returns a to the power b,
 > with a test in test_calculator.py.
+
+Do **not** ask for `multiply`: that is T-0003's request, and T-0003 stays held and
+untouched. GitHub `main` already contains T-0002's `subtract`, merged as
+`596d91d`. The CTO plans from GitHub `main`, so the new task starts from
+there. The lab repository's local `main` branch staying at `9000574` is
+expected.
 
 Expected sequence on your phone (each item is one message; nothing should arrive twice):
 
@@ -49,6 +82,7 @@ Expected sequence on your phone (each item is one message; nothing should arrive
 After each message, as root (read-only):
 
 ```bash
+cd /home/alfred/alfred-development-v1
 /usr/bin/python3 -I -B verification/capture_evidence.py --task T-NNNN
 ```
 
@@ -66,8 +100,30 @@ Then you merge or decline it. Nothing in the pipeline merges.
 
 ## Gate 7: live refusals (each must change nothing)
 
-Run one at a time, each against a fresh request where applicable. After each, confirm
-there is no new filed task, grant or PR, and that the next valid request still works.
+Run one at a time, each against a fresh request where applicable. Around each test, as
+root (read-only; you save the snapshot, the tool never writes):
+
+```bash
+cd /home/alfred/alfred-development-v1
+/usr/bin/python3 -I -B verification/capture_evidence.py --snapshot > /root/gate7-N-before.json
+# ... send the refusal case, wait one Gateway timer tick ...
+/usr/bin/python3 -I -B verification/capture_evidence.py --since /root/gate7-N-before.json
+```
+
+What the result means:
+- **`UNCHANGED` (exit 0):** nothing was added, changed or removed in any of:
+  - filed task files;
+  - job stages;
+  - `grant-*` or `publication-decision-*` records;
+  - CTO plans;
+  - completion state.
+- **`CHANGED` (exit 2):** the report lists the paths. That refusal failed. Keep
+  PAUSE in place and paste the report.
+- **Under `context`:** Gateway journal lines, request routes, intake state and
+  PAUSE are listed but not judged. A rejection may log there.
+
+Also confirm that no PR was opened on `hrsnyde1/alfred-dev-v1-acceptance`, and that
+the next valid request still works.
 
 1. A message from a phone number other than yours asking for a change.
 2. Replying to the preview with "yes" as a **new message**, not a threaded reply.

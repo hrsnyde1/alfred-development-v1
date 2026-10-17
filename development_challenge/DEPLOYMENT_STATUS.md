@@ -1,6 +1,27 @@
 # Deployment status
 
-## Correction staged for review — development-handoff.2 (not installed)
+## Current state, 2026-10-17 — handoff.2 installed and held (Gate 4)
+
+Phase B ran as root directly through the pinned installer, because the operator
+wrapper `/root/alfred-phase-b.sh` was never created on this host. Before running,
+the operator verified as root: archive `0f44351c…`, installer `f88b3f8c…`,
+manifest `4083213e…` (`verify` reported 23 files), `PRESERVED_OK`, PAUSE present
+and the backup directory absent. The install printed
+`{"status": "INSTALLED_HELD", "service_action": "none", "retry_authorized": false}`
+and exited 0, with its backup at `/root/alfred-fresh-v1-development-handoff-2-backup`.
+
+Checked afterwards as alfred: all seven `installed-after.sha256` entries are OK,
+each still `root:root` 0644 with one link. Intake, Photon and Hermes kept their
+pre-install start times with 0 restarts. PAUSE is present and STOP is absent.
+`verification/post_restart_check.py` reports `NOT_RESTARTED`, as expected
+before Phase C. The root check of the backup `index.json` and a second
+`preserved.sha256` pass have not been reported back yet.
+
+Next is Gate 5 (Phase C restart). It needs separate approval. After it, run
+`verification/post_restart_check.py` as alfred; see
+[PHASE_D_CHECKLIST.md](../verification/PHASE_D_CHECKLIST.md).
+
+## Correction staged for review — development-handoff.2 (installed 2026-10-17, see above)
 
 The owner-contract mismatch below has a staged correction:
 [OWNER_CONTRACT_CORRECTION.md](OWNER_CONTRACT_CORRECTION.md). The unchanged
