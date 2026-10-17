@@ -156,6 +156,30 @@
     "baseline_revision": {
       "type": "string",
       "pattern": "^[0-9a-f]{40}$"
+    },
+    "team_skills": {
+      "type": "object",
+      "required": ["library_commit", "role", "skills"],
+      "properties": {
+        "library_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "role": {"const": "cto"},
+        "skills": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": ["id", "title", "sha256", "tokens"],
+            "properties": {
+              "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$"},
+              "title": {"type": "string", "minLength": 1, "maxLength": 120},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "tokens": {"type": "integer", "minimum": 1}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "$defs": {

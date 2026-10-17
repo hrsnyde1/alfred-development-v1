@@ -8,6 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from developer_v1 import team_skills
 from developer_v1.router import select_specialists
 from fresh_v1.diagnostics import WorkerFailure, failure, planning_output
 from fresh_v1.handoffs import write_once
@@ -150,6 +151,9 @@ def prepare_plan(job, policy, *, remote_main=None, fetch=True):
             or plan["clarification_required"]
         ):
             raise ValueError("scope or specialist requires clarification")
+        # Owner-approved team skills from the pinned library snapshot, recorded by id
+        # and digest so the development grant (bound to this plan) fixes their text.
+        team_skills.attach(plan, spec, policy["specialists"])
         path = (
             Path(policy["gateway_state"])
             / "cto-plans"

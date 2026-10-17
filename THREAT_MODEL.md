@@ -85,3 +85,29 @@ compromise under the protected UID can access protected state and the lab
 inbox. Operator rotation of the bounded audit log must be designed before
 production. The broad legacy Hermes Photon regressions did not complete in
 this sandbox; their media assumptions require explicit compatibility review.
+
+## Team skills for Developer specialists (handoff.12)
+
+Skill text reaches a Developer model prompt, so it is treated as instructions with
+the owner's authority. Threats and controls:
+
+- **A proposer (Lucius Fox) or a compromised Fox token adds a harmful skill.** Fox can
+  only open pull requests; the owner merges. Delivery needs the owner, as root, to name
+  a merged commit; the deploy tool refuses commits not on `main`.
+- **An alfred-UID process edits the library checkout or a delivered skill.** Root reads
+  only its own `transfer.fsckObjects` clone; snapshots are root-owned and not group or
+  world writable; the loader checks owner, mode, link count, an exact file list and
+  every SHA-256 on each load.
+- **A library change loosens the rules.** The format, safety-screen and budget rules are
+  copied into the hash-pinned `developer_v1/team_skills.py` and re-run at load; a test
+  fails if they drift from the library validator.
+- **Skills change between approval and execution.** The plan records commit, id and
+  SHA-256 per skill; the development grant binds the plan digest; the Developer reloads
+  the plan's commit, not `ACTIVE`, and refuses any difference before claiming the grant.
+- **A skill tries to widen authority.** The payload states that team practices never
+  permit other files, commands or scope, and nothing relies on that sentence: the edit
+  contract, scoped paths, isolated applier and approved checks are unchanged.
+- **Prompt size.** Team practices are capped at 24 KiB and the role budget.
+
+Residual: a skill can still steer *how* an approved change is written within scope;
+the owner's review at merge time and independent QA and Review remain the controls.

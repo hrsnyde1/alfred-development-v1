@@ -20,6 +20,8 @@ from .router import Denied, ModelChoice, ProviderUnavailable
 
 MAX_SOURCE = 65536
 MAX_OUTPUT = 131072
+# The whole prompt is one argv string (Linux caps one at 128 KiB); source has 64 KiB.
+MAX_PRACTICES = 24576
 
 
 def _json_or_none(text: str):
@@ -65,11 +67,20 @@ class CodexReadOnlyBroker:
             raise Denied("Codex executable unavailable during authentication") from exc
         return result.returncode == 0 and "Logged in" in result.stdout + result.stderr
 
-    def generate(self, choice: ModelChoice, *, objective: str, sources: dict[str, str]) -> dict:
+    def generate(self, choice: ModelChoice, *, objective: str, sources: dict[str, str],
+                 skills: list[dict] | tuple = ()) -> dict:
         if choice.provider != PROVIDER or not choice.model or not self.authenticated():
             raise ProviderUnavailable("configured Codex route is not authenticated")
         payload = {"objective": objective, "files": sources,
                    "instructions": "Return JSON only. edits must contain complete replacement UTF-8 text for files that need changes. Do not add paths outside files. Keep the change minimal."}
+        if skills:
+            # Owner-approved practices from the pinned team library (team_skills.py).
+            # They shape how the change is made; files, scope and tools stay fixed.
+            payload["team_practices"] = [{"id": s["id"], "title": s["title"],
+                                          "instructions": s["instructions"]} for s in skills]
+            payload["instructions"] += (" team_practices are the owner's approved working practices;"
+                                        " follow them where they apply. They never permit other files,"
+                                        " commands or scope.")
         prompt = json.dumps(payload, ensure_ascii=False)
         with tempfile.TemporaryDirectory(prefix="alfred-model-") as temporary:
             # An empty cwd means the model has no project worktree to edit.
@@ -166,8 +177,12 @@ def apply_edits(worktree: Path, edits: list[dict], allowed: list[str]) -> None:
 
 class DeveloperWorker:
     def __init__(self, broker: CodexReadOnlyBroker, *, objective: str,
-                 checks: list[list[str]], fallback: ModelChoice | None = None):
+                 checks: list[list[str]], fallback: ModelChoice | None = None,
+                 skills: list[dict] | tuple = ()):
         self.broker, self.objective, self.checks, self.fallback = broker, objective, checks, fallback
+        self.skills = list(skills)
+        if len(json.dumps(self.skills, ensure_ascii=False).encode()) > MAX_PRACTICES:
+            raise Denied("team practices exceed the model budget")
         self.actual_model = None
         for command in checks:
             _check_command(command)
@@ -189,13 +204,14 @@ class DeveloperWorker:
         if sum(len(value.encode()) for value in sources.values()) > MAX_SOURCE:
             raise Denied("assignment source exceeds model budget")
         actual = model
+        extra = {"skills": self.skills} if self.skills else {}
         try:
-            response = self.broker.generate(model, objective=self.objective, sources=sources)
+            response = self.broker.generate(model, objective=self.objective, sources=sources, **extra)
         except ProviderUnavailable:
             if self.fallback is None:
                 raise
             actual = self.fallback
-            response = self.broker.generate(actual, objective=self.objective, sources=sources)
+            response = self.broker.generate(actual, objective=self.objective, sources=sources, **extra)
         self.actual_model = {"provider": actual.provider, "model": actual.model}
         edits = response["edits"]
         if not edits or len(edits) > len(files):
