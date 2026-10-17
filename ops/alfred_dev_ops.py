@@ -2,7 +2,8 @@
 """Restricted root operations for Alfred Development (Option C). Installed root-owned at
 /usr/local/sbin/alfred-dev-ops and run by the owner with sudo.
 
-Only these operations exist: status, pause, resume, install <N>, rollback <N>. There is
+Only these operations exist: status, pause, resume, install <N>, rollback <N> and
+resend <task> (one fresh publication approval text for an expired one). There is
 no generic command, path or argument passthrough. `install` runs a fixed sequence on a
 pinned handoff release, executing only code from inside the hash-verified archive, never
 from the alfred-writable checkout. The owner confirms each install by typing the start of
@@ -132,6 +133,45 @@ def rollback(number: int) -> dict:
     return {"release": pins["name"], "state": "rolled back", "pause": "still set"}
 
 
+TASK = re.compile(r"T-[0-9]{4,}\Z")
+JOBS = Path("/var/lib/alfred-v1-handoffs")
+GRANTS = Path("/var/lib/alfred-development-grants")
+
+
+def resend(task: str, now: float) -> dict:
+    """Authorize one fresh publication approval text for an expired, unanswered one."""
+    if not TASK.fullmatch(task):
+        raise Refused("task must look like T-0009")
+    directories = sorted(JOBS.glob(f"*/{task}"))
+    if len(directories) != 1:
+        raise Refused(f"{task} not found")
+    directory = directories[0]
+    results = sorted(directory.glob("publication-challenge*.result.json"),
+                     key=lambda p: p.stat().st_mtime)
+    if not results:
+        raise Refused(f"{task} has not asked for publication approval yet")
+    reference = json.loads(results[-1].read_bytes())["challenge"]
+    if (GRANTS / f"publication-decision-{reference}.json").exists():
+        raise Refused(f"{task} was already approved; nothing to resend")
+    receipt = json.loads((GRANTS / f"publication-challenge-{reference}.json").read_bytes())
+    if now <= receipt["expires_at"]:
+        raise Refused(f"{task}'s approval text is still open; reply yes to it")
+    n = 1
+    while (directory / f"publication-resend-{n}.json").exists():
+        n += 1
+    if (directory / f"publication-resend-{n - 1}.json").exists() and not (
+            directory / f"publication-challenge-resend-{n - 1}.result.json").exists():
+        raise Refused(f"a resend for {task} is already queued")
+    record = {"schema": "alfred.publication-resend/1", "project": directory.parent.name,
+              "task_id": task, "n": n, "authorized_by": os.environ.get("SUDO_USER"),
+              "authorized_at": now}
+    fd = os.open(directory / f"publication-resend-{n}.json",
+                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as stream:
+        stream.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    return {"task": task, "resend": n, "next": "a fresh approval text within about 2 minutes"}
+
+
 def status() -> dict:
     handoffs = Path("/var/lib/alfred-v1-handoffs")
     tasks = {}
@@ -153,6 +193,7 @@ def main() -> int:
     sub.add_parser("resume")
     for name in ("install", "rollback"):
         sub.add_parser(name).add_argument("handoff", type=int)
+    sub.add_parser("resend").add_argument("task")
     args = parser.parse_args()
     if os.geteuid() != 0:
         print("Run with sudo.", file=sys.stderr)
@@ -171,6 +212,8 @@ def main() -> int:
         elif args.operation == "install":
             answer = input("Type the first 12 characters of the archive SHA-256 from Claude's report: ")
             result = install(args.handoff, answer.strip())
+        elif args.operation == "resend":
+            result = resend(args.task, dt.datetime.now(dt.timezone.utc).timestamp())
         else:
             result = rollback(args.handoff)
     except (Refused, subprocess.CalledProcessError, OSError, ValueError) as exc:

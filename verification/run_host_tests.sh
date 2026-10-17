@@ -84,6 +84,11 @@ run handoff9 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_intake_cla
 run handoff10 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_reviewer_info_findings.py \
   tests/test_development_handoff10_upgrade.py --junitxml="$OUT/handoff10.xml"
 
+# handoff.11: plain-language owner texts, "yes" approvals and owner-run resend.
+run handoff11 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_plain_language_approvals.py \
+  tests/test_development_handoff11_upgrade.py tests/test_completion_integration.py \
+  --junitxml="$OUT/handoff11.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"

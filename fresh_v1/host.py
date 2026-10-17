@@ -16,6 +16,7 @@ import socket
 import stat
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from .diagnostics import WorkerFailure, failure, worker_failure
@@ -659,13 +660,51 @@ worker_main(sys.argv[1:])"""
 
     def publication_challenge(self, job):
         raw = (self.jobdir(job) / "publication/approved-plan.json").read_bytes()
+        plan = json.loads(
+            read_owned(
+                Path(self.p["gateway_state"])
+                / "cto-plans"
+                / f"{job['project']}-{job['task_id']}.json",
+                self.uids["alfred"],
+            )
+        )
+        # One plain-language line for the owner; the intake adds the project name.
+        goal = (plan.get("objective") or "").strip().splitlines()
         return self.intake(
             {
                 "op": "stage_publication_approval",
                 "plan_raw": raw.decode(),
                 "space_id": job["space_id"],
+                "summary": goal[0] if goal else "the approved change",
             }
         )
+
+    def publication_resend_authorized(self, job, n):
+        """The owner's root-written `alfred-dev-ops resend` record for the nth resend."""
+        path = self.jobdir(job) / f"publication-resend-{n}.json"
+        if not path.exists():
+            return False
+        record, _ = protected_json(path)
+        if record != {
+            "schema": "alfred.publication-resend/1",
+            "project": job["project"],
+            "task_id": job["task_id"],
+            "n": n,
+            "authorized_by": record.get("authorized_by"),
+            "authorized_at": record.get("authorized_at"),
+        }:
+            raise Held("publication resend authorization invalid")
+        return True
+
+    def publication_expired(self, reference):
+        """True only when that approval's window has passed without a decision."""
+        grants = Path(self.p["grant_root"])
+        if (grants / f"publication-decision-{reference}.json").exists():
+            return False
+        receipt = json.loads(
+            read_owned(grants / f"publication-challenge-{reference}.json", self.uids["alfred"])
+        )
+        return time.time() > receipt["expires_at"]
 
     def publication_authorization(self, job, reference):
         if not (

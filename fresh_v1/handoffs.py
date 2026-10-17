@@ -114,6 +114,17 @@ def advance(directory: Path, job: dict, io):
         challenge = once(
             directory, "publication-challenge", lambda: io.publication_challenge(job)
         )
+        # An unanswered approval that expired is resent only when the owner ran
+        # `alfred-dev-ops resend` for it, once per authorization, never on its own.
+        n = 1
+        while io.publication_resend_authorized(job, n):
+            name = f"publication-challenge-resend-{n}"
+            if not (directory / (name + ".result.json")).exists() and not (
+                io.publication_expired(challenge["challenge"])
+            ):
+                break
+            challenge = once(directory, name, lambda: io.publication_challenge(job))
+            n += 1
         authorization = io.publication_authorization(job, challenge["challenge"])
         if authorization is None:
             return {"state": "awaiting_publication_approval"}
