@@ -52,6 +52,49 @@ def predispatch(stage):
     return wrap
 
 
+def worktree_git_dirs(source, repository, alfred_uid):
+    """The directories git checks for ownership when root clones an alfred-owned
+    linked worktree: the worktree, its own git directory and the registered
+    repository's common git directory. Any other layout is refused, not trusted."""
+    source, common = source.resolve(), (repository / ".git").resolve()
+    marker = read_owned(source / ".git", alfred_uid).decode().strip()
+    if not marker.startswith("gitdir: "):
+        raise Held("final worktree is not a linked git worktree")
+    gitdir = Path(marker.removeprefix("gitdir: ")).resolve()
+    if not gitdir.is_absolute() or gitdir.parent != common / "worktrees":
+        raise Held("final worktree does not belong to the registered repository")
+    return [source, gitdir, common]
+
+
+def clone_snapshot(source, destination, repository, alfred_uid, *, bare=False):
+    """Root's snapshot of an approved final worktree for the Reviewer/Publisher."""
+    trusted = worktree_git_dirs(source, repository, alfred_uid)
+    with tempfile.TemporaryDirectory(prefix="alfred-handoff-git-") as name:
+        cfg = Path(name) / "gitconfig"
+        cfg.write_text(
+            "[safe]\n"
+            + "".join(f"\tdirectory = {json.dumps(str(p))}\n" for p in trusted)
+        )
+        cfg.chmod(0o600)
+        command(
+            [
+                "/usr/bin/git",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "clone",
+                "--no-local",
+                *(["--bare"] if bare else []),
+                str(source),
+                str(destination),
+            ],
+            env={
+                "PATH": "/usr/bin:/bin",
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": str(cfg),
+            },
+        )
+
+
 def qa_stage(host, job):
     return "qa-recovery-1" if (host.jobdir(job) / "qa.recovery.json").exists() else "qa"
 
@@ -422,14 +465,19 @@ worker_main(sys.argv[1:])"""
         self.copy(Path(self.p["registry"]), base / "registry.json", "alfred", ())
         plan = Path(self.p["gateway_state"]) / "cto-plans" / f"{project}-{task}.json"
         self.copy(plan, base / "gateway" / "cto-plans" / plan.name, "alfred", ())
-        for kind in (
-            "grant",
-            "challenge",
-            "decision",
-            "issuance",
-            "execution",
-            "execution-result",
-        ):
+        grant = json.loads(
+            read_owned(
+                Path(self.p["grant_root"]) / f"grant-{job['grant_reference']}.json",
+                self.uids["alfred"],
+            )
+        )
+        # A delegated grant carries the owner's policy record instead of a reply.
+        decided = (
+            ("delegation",)
+            if grant.get("source") == "delegated_owner_policy"
+            else ("challenge", "decision")
+        )
+        for kind in ("grant", *decided, "issuance", "execution", "execution-result"):
             name = f"{kind}-{job['grant_reference']}.json"
             self.copy(
                 Path(self.p["grant_root"]) / name, base / "grants" / name, "alfred", ()
@@ -473,30 +521,10 @@ worker_main(sys.argv[1:])"""
             raise Held("independent QA model evidence missing")
         return result
 
-    def clone(self, source, destination, *, bare=False):
-        with tempfile.TemporaryDirectory(prefix="alfred-handoff-git-") as name:
-            cfg = Path(name) / "gitconfig"
-            cfg.write_text(
-                "[safe]\n\tdirectory = " + json.dumps(str(source.resolve())) + "\n"
-            )
-            cfg.chmod(0o600)
-            command(
-                [
-                    "/usr/bin/git",
-                    "-c",
-                    "core.hooksPath=/dev/null",
-                    "clone",
-                    "--no-local",
-                    *(["--bare"] if bare else []),
-                    str(source),
-                    str(destination),
-                ],
-                env={
-                    "PATH": "/usr/bin:/bin",
-                    "GIT_CONFIG_NOSYSTEM": "1",
-                    "GIT_CONFIG_GLOBAL": str(cfg),
-                },
-            )
+    def clone(self, source, destination, repository, *, bare=False):
+        clone_snapshot(
+            source, destination, repository, self.uids["alfred"], bare=bare
+        )
 
     @predispatch("reviewer")
     def reviewer(self, job):
@@ -521,7 +549,11 @@ worker_main(sys.argv[1:])"""
         manifest = json.loads(
             (qain / job["project"] / job["task_id"] / "qa-input.json").read_bytes()
         )
-        self.clone(Path(manifest["final_worktree"]), base / "snapshot")
+        self.clone(
+            Path(manifest["final_worktree"]),
+            base / "snapshot",
+            Path(manifest["repository"]),
+        )
         cfg = json.loads(
             Path(
                 self.p.get(
@@ -571,7 +603,12 @@ worker_main(sys.argv[1:])"""
                 root / "qa-input" / job["project"] / job["task_id"] / "qa-input.json"
             ).read_bytes()
         )
-        self.clone(Path(manifest["final_worktree"]), base / "source.git", bare=True)
+        self.clone(
+            Path(manifest["final_worktree"]),
+            base / "source.git",
+            Path(manifest["repository"]),
+            bare=True,
+        )
         cfg = {
             "schema": "alfred.draft-pr-config/1",
             "project": job["project"],

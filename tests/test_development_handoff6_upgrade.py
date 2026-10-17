@@ -11,6 +11,9 @@ from fresh_v1 import upgrade
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
+# Install and compare against the pinned handoff.6 payload, not the live source tree,
+# which later handoffs change (handoff.8 updates developer_v1/release.sha256).
+PAYLOAD = DIST / "alfred-fresh-v1-1.0.1-development-handoff.6"
 REVIEWER_V4 = ROOT / "independent_reviewer/host-candidate-v4/independent_reviewer"
 PRESERVED = (
     "/home/alfred/Alfred/gateway/PAUSE",
@@ -63,7 +66,7 @@ def fixture(tmp_path):
             if not path.exists():
                 write(path, original(base + name, sha))
     for name in transaction.DESTINATIONS.values():
-        write(release / name, (ROOT / name).read_bytes())
+        write(release / name, (PAYLOAD / name).read_bytes())
     raw = "".join(
         hashlib.sha256((release / n).read_bytes()).hexdigest() + "  " + n + "\n"
         for n in sorted(transaction.DESTINATIONS.values())
@@ -92,7 +95,7 @@ def test_install_replaces_exactly_four_files_with_consistent_inventories(fixture
     changed = {k for k in after if before.get(k) != after[k]}
     assert changed == {name.lstrip("/") for name in transaction.DESTINATIONS}
     for name, source in transaction.DESTINATIONS.items():
-        assert after[name.lstrip("/")][0] == (ROOT / source).read_bytes()
+        assert after[name.lstrip("/")][0] == (PAYLOAD / source).read_bytes()
         assert after[name.lstrip("/")][1] == before[name.lstrip("/")][1]  # Mode kept.
     for inventory, (base, _changed) in transaction.INVENTORIES.items():
         rows = transaction.inventory_lines(upgrade.target(root, inventory).read_bytes())

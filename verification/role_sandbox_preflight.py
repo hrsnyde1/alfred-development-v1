@@ -23,6 +23,33 @@ UNIT = "alfred-development-evidence.service"
 PROBE = Path(__file__).with_name("role_sandbox_probe.py")
 ROLES = ("alfred", "alfredqa", "alfredreview", "alfredpublish")
 VIEW_MOUNT = "BindReadOnlyPaths=/home/alfred/Alfred/gateway:/run/alfred-fresh-v1-gateway"
+# Root's own handoff step: snapshot the newest final worktree exactly as the Reviewer
+# and Publisher preparation do (installed fresh_v1.host), into the private /tmp only.
+ROOT_CLONE = r'''
+import glob, json, os, pwd, sys, tempfile
+from pathlib import Path
+sys.path.insert(0, "/usr/local/lib/alfred-fresh-v1")
+from fresh_v1 import host
+REPO = Path("/home/alfred/alfred-development-lab/milestone2/task-a/live-acceptance/repo")
+finals = sorted(glob.glob("/var/lib/alfred-development-worktrees/fresh-*/*-final"),
+                key=os.path.getmtime)
+failures = []
+if not hasattr(host, "clone_snapshot"):
+    failures.append("installed host lacks clone_snapshot (handoff.7 not installed)")
+elif not finals:
+    failures.append("no final worktree available to clone")
+else:
+    for bare in (False, True):
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                host.clone_snapshot(Path(finals[-1]), Path(tmp) / "clone", REPO,
+                                    pwd.getpwnam("alfred").pw_uid, bare=bare)
+            except Exception as exc:
+                failures.append(f"{'bare' if bare else 'snapshot'} clone of "
+                                f"{Path(finals[-1]).name}: {type(exc).__name__} "
+                                + repr(getattr(exc, "stderr", b"") or b"")[:160])
+print(json.dumps({"user": "root (snapshot clone)", "checks": 2, "failures": failures}))
+'''
 # Only the settings that shape what a role can see, write, reach or execute.
 SANDBOX = {
     "ProtectSystem", "ProtectHome", "PrivateTmp", "NoNewPrivileges", "ReadWritePaths",
@@ -58,13 +85,18 @@ def main():
         print(json.dumps({"warning": "gateway view mount absent: handoff.5 not installed"}))
     probe = PROBE.read_bytes()
     results = []
-    for user in ROLES:
+    for user in (*ROLES, "root"):
         args = ["/usr/bin/systemd-run", "--quiet", "--wait", "--pipe", "--collect",
                 "--service-type=exec", f"--unit=alfred-role-preflight-{user}"]
         for prop in props:
             args += ["-p", prop]
-        args += ["/usr/sbin/runuser", "-u", user, "--", "/usr/bin/python3", "-I", "-B", "-"]
-        proc = subprocess.run(args, input=probe, capture_output=True, timeout=180, check=False)
+        if user == "root":
+            args += ["/usr/bin/python3", "-I", "-B", "-"]
+            stdin = ROOT_CLONE.encode()
+        else:
+            args += ["/usr/sbin/runuser", "-u", user, "--", "/usr/bin/python3", "-I", "-B", "-"]
+            stdin = probe
+        proc = subprocess.run(args, input=stdin, capture_output=True, timeout=180, check=False)
         line = proc.stdout.decode(errors="replace").strip().splitlines()[-1:] or [""]
         try:
             result = json.loads(line[0])
