@@ -167,6 +167,51 @@ def test_a_task_waiting_on_the_owner_does_not_block_the_next_one(world):
     assert len([m for m in world.messages if "Development execution approval" in m[1]]) == 1
 
 
+def test_a_held_task_does_not_block_the_next_request(world):
+    import os
+    from unittest.mock import patch
+
+    from fresh_v1 import host
+    from fresh_v1.protected import protected_json
+    from tests.test_fresh_v1 import OWNER, save
+
+    # The first request is held for good: its Reviewer requested changes.
+    world.review_decision = "CHANGES_REQUESTED"
+    world.submit()
+    world.tick()
+    world.approve_development()
+    assert world.tick() == {"state": "held", "reason": "independent Reviewer did not approve"}
+    held_job = world.jobdir(world.job)
+    evidence = {p.name: p.read_bytes() for p in held_job.glob("*.json")}
+    world.github.pr_list = []
+    world.submit(identifier="mock-second-owner-request")
+    save(world.gateway.gateway_dir / "v1-1-intake.json", {"owner_sender_id": OWNER})
+    calls = len(world.calls)
+    with (
+        patch.object(host, "require_root"),
+        patch.object(host, "root_directory", lambda path: None),
+        patch.object(host, "protected_json", lambda p: protected_json(
+            p, trusted_uid=os.geteuid(), trusted_root=world.root)),
+        patch.object(host, "Host", return_value=world),
+        patch.object(host.pwd, "getpwnam", return_value=type("Photon", (), {"pw_uid": SIDE})()),
+    ):
+        result = host.poll(world.policy_path)
+    # The second request was planned this tick; the held one was left exactly as it was.
+    assert result["state"] == "awaiting_development_approval", result
+    assert world.calls[calls:] == [("plan", "alfred")]
+    assert {p.name: p.read_bytes() for p in held_job.glob("*.json")} == evidence
+
+
+def test_only_recorded_verdicts_are_moved_past():
+    from fresh_v1 import host
+
+    source = (ROOT / "fresh_v1/handoffs.py").read_text()
+    # Every skippable hold is raised verbatim by a stage after its result is recorded.
+    for reason in host.VERDICT_HOLDS:
+        assert f'"{reason}"' in source, reason
+    assert not any("reconciliation" in reason for reason in host.VERDICT_HOLDS)
+
+
 def test_owner_registry_entry_for_the_demo_site_is_valid():
     from alfred.registry.loader import parse_registry
 
