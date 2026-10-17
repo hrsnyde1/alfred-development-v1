@@ -70,6 +70,13 @@ run handoff6 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_model_mess
 run handoff7 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_root_clone_ownership.py \
   tests/test_development_handoff7_upgrade.py --junitxml="$OUT/handoff7.xml"
 
+# handoff.8: owner-delegated development approval, its installer, Independent QA's
+# evidence check and the restricted root operations helper.
+run handoff8 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_delegated_development_approval.py \
+  tests/test_development_handoff8_upgrade.py tests/test_alfred_dev_ops.py tests/test_independent_qa.py \
+  tests/test_developer_execution_v1.py --junitxml="$OUT/handoff8.xml"
+
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"

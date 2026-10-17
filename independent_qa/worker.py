@@ -167,8 +167,6 @@ def load_authority(registry_path: Path, gateway_state: Path, grant_root: Path,
             request.get("scope") and type(request["scope"]) is list,
             "owner_approval", "Developer run request does not bind task and grant")
     grant, grant_sha = read_json(grant_root / f"grant-{ref}.json")
-    challenge, challenge_sha = read_json(grant_root / f"challenge-{ref}.json")
-    decision, decision_sha = read_json(grant_root / f"decision-{ref}.json")
     issuance, _ = read_json(grant_root / f"issuance-{ref}.json")
     claim, claim_sha = read_json(grant_root / f"execution-{ref}.json")
     result, _ = read_json(grant_root / f"execution-result-{ref}.json")
@@ -177,15 +175,31 @@ def load_authority(registry_path: Path, gateway_state: Path, grant_root: Path,
                         "spec_sha256": digest(spec_bytes), "plan_sha256": plan_sha,
                         "scope": grant.get("scope"), "specialists": grant.get("specialists"),
                         "worktree_root": grant.get("worktree_root"), "state": "pending_owner_decision"}
-    checks = {"authenticated_sender", "same_dm", "fresh_event", "native_direct_reply",
-              "not_forwarded", "within_challenge_lifetime", "exact_phrase", "single_use"}
+    if grant.get("source") == "delegated_owner_policy":
+        decided = delegated_decision(grant_root, ref, grant, grant_sha, issuance, expected_request)
+    else:
+        decided = owner_reply_decision(grant_root, ref, grant, grant_sha, issuance, expected_request)
     require(grant.get("schema") == "alfred.development-grant/1" and grant.get("state") == "approved" and
             grant.get("reference") == ref and grant.get("issuer") == "trusted_owner_authority" and
             grant.get("repository") == str(repository) and
             grant.get("spec_sha256") == digest(spec_bytes) and grant.get("plan_sha256") == plan_sha and
             grant.get("scope") == request.get("scope") and
-            grant.get("worktree_root") == request.get("worktree_root") and
-            challenge.get("schema") == "alfred.development-challenge/1" and
+            grant.get("worktree_root") == request.get("worktree_root") and decided and
+            claim.get("grant_sha256") == grant_sha and claim.get("reference") == ref and
+            result.get("claim_sha256") == claim_sha and result.get("reference") == ref and
+            result.get("status") == "completed",
+            "owner_approval", "Grant issuance or completed execution evidence mismatch")
+    return plan, grant, projects[0], plan_sha, digest(spec_bytes), grant_sha
+
+
+def owner_reply_decision(grant_root: Path, ref: str, grant: dict, grant_sha: str,
+                         issuance: dict, expected_request: dict) -> bool:
+    """The owner's native in-thread iMessage reply approved this exact request."""
+    challenge, challenge_sha = read_json(grant_root / f"challenge-{ref}.json")
+    decision, decision_sha = read_json(grant_root / f"decision-{ref}.json")
+    checks = {"authenticated_sender", "same_dm", "fresh_event", "native_direct_reply",
+              "not_forwarded", "within_challenge_lifetime", "exact_phrase", "single_use"}
+    return (challenge.get("schema") == "alfred.development-challenge/1" and
             challenge.get("request") == expected_request and challenge.get("reference") == ref and
             decision.get("schema") == "alfred.development-owner-decision/1" and
             decision.get("reference") == ref and decision.get("challenge_sha256") == challenge_sha and
@@ -200,12 +214,31 @@ def load_authority(registry_path: Path, gateway_state: Path, grant_root: Path,
             all(decision["checks"].values()) and
             issuance.get("grant_sha256") == grant_sha and
             issuance.get("challenge_sha256") == challenge_sha and
-            issuance.get("decision_sha256") == decision_sha and
-            claim.get("grant_sha256") == grant_sha and claim.get("reference") == ref and
-            result.get("claim_sha256") == claim_sha and result.get("reference") == ref and
-            result.get("status") == "completed",
-            "owner_approval", "Grant issuance or completed execution evidence mismatch")
-    return plan, grant, projects[0], plan_sha, digest(spec_bytes), grant_sha
+            issuance.get("decision_sha256") == decision_sha)
+
+
+def delegated_decision(grant_root: Path, ref: str, grant: dict, grant_sha: str,
+                       issuance: dict, expected_request: dict) -> bool:
+    """The owner's root-protected standing policy approved this exact request."""
+    record, record_sha = read_json(grant_root / f"delegation-{ref}.json")
+    policy = record.get("policy")
+    development = policy.get("development_approval") if type(policy) is dict else None
+    policy_sha = digest(json.dumps(policy, sort_keys=True, separators=(",", ":")).encode())
+    return (record.get("schema") == "alfred.development-delegated-decision/1" and
+            record.get("reference") == ref and record.get("request") == expected_request and
+            record.get("decision") == "approve_development" and
+            record.get("decided_by") == "owner_delegation_policy" and
+            type(policy) is dict and record.get("policy_sha256") == policy_sha and
+            policy.get("schema") == "alfred.development-delegation-policy/1" and
+            policy.get("publication_approval") == "owner" and
+            type(development) is dict and development.get("enabled") is True and
+            type(development.get("projects")) is list and
+            expected_request["project"] in development["projects"] and
+            grant.get("delegation_sha256") == record_sha and
+            issuance.get("schema") == "alfred.development-delegated-issuance/1" and
+            issuance.get("grant_sha256") == grant_sha and
+            issuance.get("delegation_sha256") == record_sha and
+            issuance.get("policy_sha256") == policy_sha)
 
 
 def verify(manifest_path: Path, report_dir: Path, registry: Path, gateway_state: Path,
