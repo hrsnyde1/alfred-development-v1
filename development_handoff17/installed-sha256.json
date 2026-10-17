@@ -1,0 +1,12 @@
+{
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/host.py": "8f080553b94e462ffb251159164c6be41d808dde5ff2230c5070909a52c3ddd3",
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/role.py": "7e8e4ee0495dbeaf8e812576f8f8c1ede0e16b1f8c426baaa973239dd522d0ab",
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/handoffs.py": "1d612babbbfccd422b5ba7198ae01e5943f84f2f0cd6b4400c5425ec18caecbe",
+  "/opt/alfred-developer-v1/developer_v1/pipeline.py": "2b78eaabfd5de738c921cd6f1377ee7ea192759bc2a3907014948702063f5599",
+  "/opt/alfred-developer-v1/developer_v1/run_task.py": "dd93a1a89975b8a36bc0ce9108cee81dfb18afb131cae05e4dcdc1e95cb69266",
+  "/opt/alfred-developer-v1/developer_v1/owner_grants.py": "f54d0f51bac5af08c85968da3d81b7ff419f0654d1326886dcc8140653b02fb9",
+  "/opt/alfred-developer-v1/developer_v1/execution.py": "01a8aaba3ebad98cc47f3905ac146460ca0f79504ae9166cfac71ec4ef6f810c",
+  "/opt/alfred-independent-qa-v1/independent_qa/worker.py": "709614f4ef24a8c4e45d323e1b921b8a2b7dac0a9531d5fb3deff89f0c37889b",
+  "/usr/local/lib/alfred-v1.1/trusted_intake.py": "d1f70a05cc82f64828e55e66ece75d594efca41323c2ad21c342c7843699426f",
+  "/opt/alfred-developer-v1/developer_v1/trusted_intake_development.py": "d1f70a05cc82f64828e55e66ece75d594efca41323c2ad21c342c7843699426f"
+}
