@@ -65,6 +65,11 @@ run handoff5 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_fresh_v1_r
 run handoff6 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_model_message_contract.py \
   tests/test_development_handoff6_upgrade.py --junitxml="$OUT/handoff6.xml"
 
+# 3f. handoff.7: root's snapshot clone trusts the worktree, its git directory and the
+#     registered common directory (git ownership hardening); the one-file installer.
+run handoff7 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_root_clone_ownership.py \
+  tests/test_development_handoff7_upgrade.py --junitxml="$OUT/handoff7.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"
