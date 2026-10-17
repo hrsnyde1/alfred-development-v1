@@ -1,0 +1,4 @@
+9f96b4d7fca5e7635fb1ccc7d688d32604f514a9fe312b68d02a17c5ffe040ab  /usr/local/lib/alfred-fresh-v1/fresh_v1/host.py
+a515f6e3ff0a4babe44a33c28541657544468f7a233ee8eeb70e4ab48037248c  /usr/local/lib/alfred-fresh-v1/fresh_v1/handoffs.py
+0dfb91ff0265d8ddb669a33edf34824213118c97bd6fd334a31a81ca1c88d1c6  /usr/local/lib/alfred-fresh-v1/fresh_v1/qa_recovery.py
+d657abe22c11bdc0cc9c95de8abf350152aa54f4fe3e30dea17000a326e7aac3  /etc/systemd/system/alfred-development-evidence.service.d/40-fresh-v1.conf

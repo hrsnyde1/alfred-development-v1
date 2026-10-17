@@ -404,6 +404,7 @@ class World(host.Host):
 
     def worker(self, job, stage, user):
         self.guard()
+        self.dispatched = True  # As Host.worker, immediately before the role starts.
         self.calls.append((stage, user))
         real_execute, real_review, real_publish, real_notify = (
             pipeline.execute_gateway_task,

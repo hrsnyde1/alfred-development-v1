@@ -65,7 +65,13 @@ def advance(directory: Path, job: dict, io):
         developed = once(directory, "developer", lambda: io.developer(job))
         if developed.get("state") != "ready_for_independent_qa":
             raise Held("developer did not produce a completed handoff")
-        qa = once(directory, "qa", lambda: io.qa(job))
+        if (directory / "qa.recovery.json").exists():
+            # Exactly one separately authorized incident recovery. No generic retry.
+            io.verify_qa_recovery(job)
+            qa = once(directory, "qa-recovery-1", lambda: io.qa(job))
+            io.verify_qa_recovery(job)
+        else:
+            qa = once(directory, "qa", lambda: io.qa(job))
         if qa.get("decision") != "PASS":
             raise Held("independent QA did not pass")
         review = once(directory, "reviewer", lambda: io.reviewer(job))
