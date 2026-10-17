@@ -9,6 +9,12 @@ fresh V1 policy and prints one JSON report: every stage file in pipeline order w
 its SHA-256, a small allowlist of status fields, and a PASS / PENDING / HELD / FAIL
 verdict per acceptance gate. File bodies, model output, tokens and message text are
 never printed. Paste the output back for review.
+
+Gate 7 refusal tests use a before/after fingerprint instead (names and digests
+only; the operator saves the first output, the tool itself still never writes):
+
+    /usr/bin/python3 -I -B verification/capture_evidence.py --snapshot > /root/gate7-before.json
+    /usr/bin/python3 -I -B verification/capture_evidence.py --since /root/gate7-before.json
 """
 
 from __future__ import annotations
@@ -58,7 +64,7 @@ class Unsafe(ValueError):
     pass
 
 
-def read(path: Path) -> bytes | None:
+def read(path: Path, limit: int = MAX_BYTES) -> bytes | None:
     """Bounded, no-follow read of a regular single-link file; None if absent."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -70,8 +76,8 @@ def read(path: Path) -> bytes | None:
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise Unsafe(f"not a regular single-link file: {path.name}")
-        raw = stream.read(MAX_BYTES + 1)
-    if len(raw) > MAX_BYTES:
+        raw = stream.read(limit + 1)
+    if len(raw) > limit:
         raise Unsafe(f"oversize: {path.name}")
     return raw
 
@@ -232,13 +238,141 @@ def capture(policy_path: Path, project: str | None, task: str) -> dict:
     }
 
 
+# Gate 7 refusals must change nothing. A snapshot fingerprints the state a refused
+# request could touch; comparing a later snapshot names what appeared or changed.
+# "authority" roots hold filed tasks, jobs, grants and plans: any delta is a FAIL.
+# "context" files (journal, intake state, routes, PAUSE) are reported, not judged.
+SNAPSHOT_SCHEMA = "alfred.phase-d-snapshot/1"
+MAX_FILES = 20000
+MAX_HASH_BYTES = 256 * 1024 * 1024
+AUTHORITY_GRANTS = re.compile(r"(grant|publication-decision)-[^/]*\.json\Z")
+
+
+def fingerprint(path: Path) -> str:
+    """Streamed SHA-256 of a regular file opened without following links."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            return "not-regular"
+        digest, total = hashlib.sha256(), 0
+        while chunk := stream.read(1024 * 1024):
+            total += len(chunk)
+            if total > MAX_HASH_BYTES:
+                raise Unsafe(f"oversize: {path.name}")
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def walk(root: Path) -> dict:
+    """Relative path -> digest for every entry under root; links are not followed."""
+    if root.is_symlink():
+        raise Unsafe(f"symlinked snapshot root: {root.name}")
+    if not root.is_dir():
+        return {}
+    found = {}
+    def refuse(exc):
+        # A skipped unreadable directory would otherwise look unchanged.
+        raise Unsafe(f"unreadable under {root.name}: errno={exc.errno}")
+
+    for directory, dirs, files in os.walk(root, onerror=refuse, followlinks=False):
+        base = Path(directory)
+        for name in sorted(dirs):
+            if (base / name).is_symlink():
+                found[str((base / name).relative_to(root))] = "symlink"
+        for name in sorted(files):
+            path = base / name
+            found[str(path.relative_to(root))] = (
+                "symlink" if path.is_symlink() else fingerprint(path)
+            )
+            if len(found) > MAX_FILES:
+                raise Unsafe(f"too many files under {root.name}")
+    return found
+
+
+def snapshot(policy_path: Path, project: str | None) -> dict:
+    policy = load(read(policy_path))
+    if policy is None:
+        raise Unsafe("policy missing")
+    project = project or policy["project"]
+    if not PROJECT.fullmatch(project):
+        raise Unsafe("invalid project identity")
+    gateway = Path(policy["gateway_state"])
+    grants = walk(Path(policy["grant_root"]))
+    state = walk(gateway)
+    return {
+        "schema": SNAPSHOT_SCHEMA,
+        "project": project,
+        "authority": {
+            "tasks": walk(Path(policy["repository"]) / ".dev" / "tasks"),
+            "jobs": walk(Path(policy["jobs"]) / project),
+            "grants": {k: v for k, v in grants.items() if AUTHORITY_GRANTS.match(k)},
+            "cto_plans": {
+                k: v for k, v in state.items() if k.startswith("cto-plans/")
+            },
+            "completion": walk(Path(policy["completion_state"])),
+        },
+        "context": {
+            "grant_root": {
+                k: v for k, v in grants.items() if not AUTHORITY_GRANTS.match(k)
+            },
+            "gateway_state": {
+                k: v for k, v in state.items() if not k.startswith("cto-plans/")
+            },
+        },
+    }
+
+
+def delta(before: dict, after: dict) -> dict:
+    return {
+        "added": sorted(set(after) - set(before)),
+        "changed": sorted(k for k in set(before) & set(after) if before[k] != after[k]),
+        "removed": sorted(set(before) - set(after)),
+    }
+
+
+def compare(policy_path: Path, project: str | None, baseline: Path) -> dict:
+    before = load(read(baseline, 64 * MAX_BYTES))
+    if before is None or before.get("schema") != SNAPSHOT_SCHEMA:
+        raise Unsafe("baseline is not a Phase D snapshot")
+    after = snapshot(policy_path, project or before.get("project"))
+    if after["project"] != before.get("project"):
+        raise Unsafe("baseline project differs")
+    report = {"schema": "alfred.phase-d-refusal/1", "project": after["project"]}
+    for section in ("authority", "context"):
+        report[section] = {}
+        for name, entries in after[section].items():
+            found = delta(before[section].get(name, {}), entries)
+            if any(found.values()):
+                report[section][name] = found
+    report["overall"] = "CHANGED" if report["authority"] else "UNCHANGED"
+    return report
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--task", required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--task")
+    mode.add_argument(
+        "--snapshot",
+        action="store_true",
+        help="print a state fingerprint to keep before a Gate 7 refusal test",
+    )
+    mode.add_argument(
+        "--since",
+        type=Path,
+        help="compare current state with a saved --snapshot; CHANGED fails",
+    )
     parser.add_argument("--project")
     parser.add_argument("--policy", type=Path, default=POLICY)
     args = parser.parse_args(argv)
     try:
+        if args.snapshot:
+            print(json.dumps(snapshot(args.policy, args.project), sort_keys=True))
+            return 0
+        if args.since:
+            result = compare(args.policy, args.project, args.since)
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return 0 if result["overall"] == "UNCHANGED" else 2
         report = capture(args.policy, args.project, args.task)
     except (Unsafe, OSError, ValueError, KeyError) as exc:
         # Never echo file bodies; the exception text names only a path or check.
