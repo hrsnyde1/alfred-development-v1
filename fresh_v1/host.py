@@ -465,14 +465,19 @@ worker_main(sys.argv[1:])"""
         self.copy(Path(self.p["registry"]), base / "registry.json", "alfred", ())
         plan = Path(self.p["gateway_state"]) / "cto-plans" / f"{project}-{task}.json"
         self.copy(plan, base / "gateway" / "cto-plans" / plan.name, "alfred", ())
-        for kind in (
-            "grant",
-            "challenge",
-            "decision",
-            "issuance",
-            "execution",
-            "execution-result",
-        ):
+        grant = json.loads(
+            read_owned(
+                Path(self.p["grant_root"]) / f"grant-{job['grant_reference']}.json",
+                self.uids["alfred"],
+            )
+        )
+        # A delegated grant carries the owner's policy record instead of a reply.
+        decided = (
+            ("delegation",)
+            if grant.get("source") == "delegated_owner_policy"
+            else ("challenge", "decision")
+        )
+        for kind in ("grant", *decided, "issuance", "execution", "execution-result"):
             name = f"{kind}-{job['grant_reference']}.json"
             self.copy(
                 Path(self.p["grant_root"]) / name, base / "grants" / name, "alfred", ()

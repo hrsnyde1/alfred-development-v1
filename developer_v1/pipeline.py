@@ -32,13 +32,15 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
                      state_root: Path, checks: list[list[str]] | None = None,
                      total_cost_limit: float, overrides: dict | None = None,
                      broker: CodexReadOnlyBroker | None = None,
-                     grant_environment: str = "host", baseline_revision: str | None = None) -> tuple[list[dict], dict]:
+                     grant_environment: str = "host", baseline_revision: str | None = None,
+                     delegation_policy: Path | None = None) -> tuple[list[dict], dict]:
     """Runs only after protected authority verifies the exact Gateway inputs."""
     approved_baseline = json.loads(inputs.plan_raw).get("baseline_revision")
     if baseline_revision is not None and approved_baseline != baseline_revision:
         raise Denied("baseline differs from the owner-approved CTO plan")
     baseline_revision = approved_baseline
-    authority = ProtectedDevelopmentAuthority(grant_root, environment=grant_environment)
+    authority = ProtectedDevelopmentAuthority(grant_root, environment=grant_environment,
+                                              delegation_policy=delegation_policy)
     dispatch = route(inputs.spec_raw, inputs.plan_raw, project=project, task_id=task_id,
                      repository=inputs.repository, worktree_root=worktree_root,
                      scope=scope, authorization_reference=grant_reference,
