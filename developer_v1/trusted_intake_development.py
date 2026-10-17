@@ -409,6 +409,38 @@ class IntakeGate:
             raise IntakeRefused("explicit_authorized_project_required")
         return matches[0].id
 
+    def _linked_request(self, followup: Observed) -> Observed:
+        """Hermes asks a clarifying question first, then submits the owner's short answer
+        ("2", "yes"), which names no project. File the owner's own request from the same
+        DM within the event lifetime instead, exactly as if Hermes had submitted it. The
+        project still comes only from genuine owner text, and the preview still needs the
+        owner's native confirmation."""
+        now = self.clock()
+        candidates = []
+        for record in self._observed.values():
+            if (record is followup or record.space_digest != followup.space_digest
+                    or record.received_at > followup.received_at
+                    or now - record.received_at > MAX_EVENT_AGE
+                    or record.phase != "observed" or record.message_id in self._retired
+                    or record.message_id in self._completed or record.message_id in self._terminal):
+                continue
+            try:
+                project = self._project(record.text)
+            except IntakeRefused:
+                continue
+            if _development_request_text(record.text, project=project):
+                candidates.append((record.received_at, project, record))
+        # Requests naming different projects are ambiguous; the owner must restate one.
+        if not candidates or len({project for _, project, _ in candidates}) != 1:
+            raise IntakeRefused("explicit_authorized_project_required")
+        original = max(candidates, key=lambda candidate: candidate[0])[2]
+        # The answer is consumed; Hermes's status calls on this turn follow the original.
+        self._observed.pop(followup.message_id, None)
+        self._retired[followup.message_id] = followup.text_digest
+        self._status_turn = (followup.message_id, followup.text_digest,
+                             followup.space_digest, now, original.request_id)
+        return original
+
     def _require_active(self, event_id: str, digest: str) -> Observed:
         active = self._active
         if active is None or active.message_id != event_id or active.text_digest != digest:
@@ -425,11 +457,17 @@ class IntakeGate:
                 active = self._observed.get(event_id)
                 if active is None or active.text_digest != digest or event_id in self._retired:
                     raise IntakeRefused("unverified_event")
+                try:
+                    self._project(active.text)
+                except IntakeRefused as exc:
+                    if exc.code != "explicit_authorized_project_required":
+                        raise
+                    active = self._linked_request(active)
                 if not _development_request_text(active.text, project=self._project(active.text)):
                     raise IntakeRefused("not_development_request")
                 if self.clock() - active.received_at > MAX_EVENT_AGE:
-                    self._observed.pop(event_id, None)
-                    self._retired[event_id] = active.text_digest
+                    self._observed.pop(active.message_id, None)
+                    self._retired[active.message_id] = active.text_digest
                     raise IntakeRefused("expired_event")
                 try:
                     if Journal(self.gateway_dir / "journal.jsonl").outcomes_for(active.request_id):
@@ -462,7 +500,7 @@ class IntakeGate:
                 except (OSError, ValueError, TimeoutError):
                     active.phase = "uncertain"
                     self._active = None
-                    self._retired[event_id] = digest
+                    self._retired[active.message_id] = active.text_digest
                     raise IntakeRefused("preview_unavailable") from None
                 active.preview_id = preview_id
                 active.preview_at = self.clock()
