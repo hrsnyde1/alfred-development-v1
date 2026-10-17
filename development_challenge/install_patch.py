@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import pwd
 import stat
 import sys
 from pathlib import Path
@@ -54,6 +55,15 @@ DEPENDENCIES = {
         }.items()
     },
 }
+# Unchanged dependencies whose established host owner is not the installer.
+# Only the owner differs: each must still be a regular, single-link file without
+# group/other write permission and with its exact pinned digest. No destination
+# or other dependency may use this exception.
+DEPENDENCY_OWNERS = {PHOTON + "index.mjs": "alfred"}
+if not set(DEPENDENCY_OWNERS) <= set(DEPENDENCIES) or set(DEPENDENCY_OWNERS) & set(
+    DESTINATIONS
+):
+    raise RuntimeError("dependency owner exception outside unchanged dependencies")
 
 
 def paused(root):
@@ -63,12 +73,22 @@ def paused(root):
         raise ValueError("operator PAUSE and idle workers required")
 
 
-def checked(path, sha):
+def dependency_uid(name):
+    owner = DEPENDENCY_OWNERS.get(name)
+    if owner is None:
+        return os.geteuid()
+    uid = pwd.getpwnam(owner).pw_uid
+    if uid == 0:
+        raise ValueError("dependency owner exception must name an unprivileged user")
+    return uid
+
+
+def checked(path, sha, uid=None):
     info = path.lstat()
     if (
         not stat.S_ISREG(info.st_mode)
         or info.st_nlink != 1
-        or info.st_uid != os.geteuid()
+        or info.st_uid != (os.geteuid() if uid is None else uid)
         or info.st_mode & 0o022
         or upgrade.digest(path.read_bytes()) != sha
     ):
@@ -147,7 +167,7 @@ def install(release, pin, root, backup, *, fail_after=None):
         raise ValueError("release changed after verification")
     previous = {n: checked(upgrade.target(root, n), sha) for n, sha in BASE.items()}
     for name, sha in DEPENDENCIES.items():
-        checked(upgrade.target(root, name), sha)
+        checked(upgrade.target(root, name), sha, dependency_uid(name))
     old = inventory(previous[DEVELOPER + "developer_v1/release.sha256"][1])
     new = inventory(content["developer_v1/release.sha256"])
     expected = {

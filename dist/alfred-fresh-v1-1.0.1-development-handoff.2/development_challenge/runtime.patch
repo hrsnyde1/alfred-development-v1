@@ -1,0 +1,551 @@
+--- a/opt/alfred-developer-v1/developer_v1/owner_grants.py
++++ b/opt/alfred-developer-v1/developer_v1/owner_grants.py
+@@ -6,7 +6,9 @@
+ 
+ from __future__ import annotations
+ 
++import ctypes
+ import datetime as dt
++import errno
+ import hashlib
+ import json
+ import os
+@@ -23,6 +25,26 @@
+ REF = re.compile(r"[0-9a-f]{32}\Z")
+ MAX_AGE = 300
+ PERMISSIONS = {"read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"}
++
++
++class DevelopmentSendFailure(OSError):
++    """Only the protected transport may classify a send; no raw provider text."""
++
++    def __init__(self, delivery_state: str, reason_code: str):
++        if delivery_state not in {"not_attempted", "uncertain"} or reason_code not in {
++            "connect_failed", "http_preflight_refused", "provider_refused",
++            "http_failed", "ack_timeout", "ack_invalid", "intent_unavailable",
++        }:
++            raise ValueError("invalid development send outcome")
++        self.delivery_state, self.reason_code = delivery_state, reason_code
++        super().__init__("development challenge send " + reason_code)
++
++
++def _send_slot(request: dict) -> str:
++    # An exact task may be attempted once. Changing its plan/DM cannot bypass it.
++    return "development-send-" + _digest({
++        "project": request["project"], "task_id": request["task_id"],
++    }) + ".json"
+ 
+ 
+ def _bytes(value: dict) -> bytes:
+@@ -91,6 +113,43 @@
+     try:
+         os.fsync(directory)
+     finally:
++        os.close(directory)
++
++
++def _rename_noreplace(directory: int, source: str, destination: str) -> None:
++    """Publish exactly once without exposing a hard link to the Gateway reader."""
++    try:
++        rename = ctypes.CDLL(None, use_errno=True).renameat2
++    except AttributeError:
++        raise OSError(errno.ENOSYS, "atomic no-replace rename is unavailable") from None
++    rename.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
++                       ctypes.c_char_p, ctypes.c_uint)
++    rename.restype = ctypes.c_int
++    if rename(directory, os.fsencode(source), directory, os.fsencode(destination), 1) != 0:
++        code = ctypes.get_errno()
++        raise OSError(code, os.strerror(code), destination)
++
++
++
++def _write_delivery_record(root: Path, name: str, value: dict) -> None:
++    """A private ACK/index is visible only after its complete bytes are fsynced."""
++    _protected(root)
++    directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
++    temporary = f".{name}.{uuid.uuid4().hex}.tmp"
++    try:
++        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
++                     0o600, dir_fd=directory)
++        with os.fdopen(fd, "wb") as stream:
++            stream.write(_bytes(value))
++            stream.flush()
++            os.fsync(stream.fileno())
++        _rename_noreplace(directory, temporary, name)
++        os.fsync(directory)
++    finally:
++        try:
++            os.unlink(temporary, dir_fd=directory)
++        except FileNotFoundError:
++            pass
+         os.close(directory)
+ 
+ 
+@@ -259,6 +318,45 @@
+         self.environment = environment
+         self._lock = threading.Lock()
+ 
++    def _ack_pending(self):
++        """Index durable acknowledgements if interrupted before pending indexing.
++
++        Legacy receipts without a send intent are never adopted this way. This
++        reads a genuine native ID; it does not send or create approval evidence.
++        """
++        result = []
++        for path in self.root.glob("challenge-*.json"):
++            receipt = _read(self.root, path.name)
++            reference = path.stem.removeprefix("challenge-")
++            if ("send_attempt_sha256" not in receipt
++                    or (self.root / f"pending-{reference}.json").exists()
++                    or (self.root / f"decision-{reference}.json").exists()
++                    or (self.root / f"expired-{reference}.json").exists()):
++                continue
++            attempt = _read(self.root, _send_slot(receipt["request"]))
++            expected = {k: v for k, v in receipt.items()
++                        if k not in {"schema", "message_id", "send_attempt_sha256"}}
++            if (attempt != {**expected, "schema": "alfred.development-send-attempt/1",
++                            "delivery_state": "uncertain_until_ack"}
++                    or receipt.get("schema") != "alfred.development-challenge/1"
++                    or _digest(attempt) != receipt["send_attempt_sha256"]
++                    or receipt.get("reference") != reference
++                    or receipt.get("owner_id") != self.owner
++                    or type(receipt.get("message_id")) is not str
++                    or not 1 <= len(receipt["message_id"]) <= 200
++                    or receipt.get("expires_at") != receipt["issued_at"] + MAX_AGE
++                    or receipt.get("challenge_text_sha256") != _digest(_challenge_text(
++                        receipt["request"], receipt["plan_raw"].encode() if "plan_raw" in receipt else None).encode())
++                    or receipt.get("phrase_sha256") != _digest(_phrase(receipt["request"]).encode())):
++                raise Denied("development send acknowledgement binding mismatch")
++            result.append((None, {
++                "request": receipt["request"], "space_id": receipt["space_id"],
++                "message_id": receipt["message_id"],
++                "phrase": _phrase(receipt["request"]), "created_at": receipt["issued_at"],
++                "reference": reference,
++            }))
++        return result
++
+     def stage(self, request: dict, *, space_id: str, peer_uid: int, plan_raw: bytes | None = None) -> dict:
+         if peer_uid != self.admin_uid or not isinstance(space_id, str) or not space_id:
+             raise Denied("development approval staging requires protected administrator")
+@@ -270,6 +368,8 @@
+         # binding recompute the request; raw client-supplied requests are refused
+         # by the intake extension.
+         with self._lock:
++            if (self.root / _send_slot(request)).exists():
++                raise Denied("development challenge already attempted; reconciliation required")
+             for path in self.root.glob("pending-*.json"):
+                 prior = _read(self.root, path.name)
+                 if self.clock() - prior["created_at"] > MAX_AGE:
+@@ -284,7 +384,9 @@
+                     except FileExistsError:
+                         pass
+                     path.unlink()
+-            if any(self.root.glob("pending-*.json")):
++            if (any(self.root.glob("pending-*.json"))
++                    or any(self.clock() <= p["created_at"] + MAX_AGE
++                           for _, p in self._ack_pending())):
+                 raise Denied("another development approval is pending")
+             for path in self.root.glob("grant-*.json"):
+                 old = _read(self.root, path.name)
+@@ -307,17 +409,37 @@
+                 "challenge_text_sha256": _digest(message.encode()),
+                 "phrase_sha256": _digest(phrase.encode()),
+                 **({"plan_raw": plan_raw.decode()} if plan_raw is not None else {})}
++            attempt = {k: v for k, v in receipt.items() if k != "message_id"}
++            attempt.update(schema="alfred.development-send-attempt/1",
++                           delivery_state="uncertain_until_ack")
++            receipt["send_attempt_sha256"] = _digest(attempt)
+             # The existing evidence reader is bounded to 16 KiB. Validate the
+             # complete receipt before a send, reserving timestamp encoding room.
+             if len(_bytes(receipt)) > 16300:
+                 raise Denied("development approval evidence too large")
+-            message_id = self.send(space_id, message)
+-            if not isinstance(message_id, str) or not 1 <= len(message_id) <= 200:
+-                raise Denied("approval challenge delivery unverified")
+-            issued_at = self.clock()
+-            receipt.update(message_id=message_id, issued_at=issued_at, expires_at=issued_at + MAX_AGE)
+-            _write_once(self.root, f"challenge-{challenge}.json", receipt)
+-            _write_once(self.root, f"pending-{challenge}.json", {
++            try:
++                _write_once(self.root, _send_slot(request), attempt)
++            except FileExistsError as exc:
++                raise Denied("development challenge already attempted; reconciliation required") from exc
++            except (OSError, Denied) as exc:
++                raise DevelopmentSendFailure("not_attempted", "intent_unavailable") from exc
++            try:
++                message_id = self.send(space_id, message)
++                if not isinstance(message_id, str) or not 1 <= len(message_id) <= 200:
++                    raise DevelopmentSendFailure("uncertain", "ack_invalid")
++            except (OSError, ValueError, Denied) as exc:
++                _write_once(self.root, f"development-send-outcome-{challenge}.json", {
++                    "schema": "alfred.development-send-outcome/1", "reference": challenge,
++                    "send_attempt_sha256": _digest(attempt), "recorded_at": self.clock(),
++                    "delivery_state": exc.delivery_state if isinstance(exc, DevelopmentSendFailure) else "uncertain",
++                    "reason_code": exc.reason_code if isinstance(exc, DevelopmentSendFailure) else "unclassified",
++                })
++                raise
++            # Native replies may arrive while Photon is returning its ACK. Pin
++            # lifetime to dispatch, never to the later ACK or restart time.
++            receipt.update(message_id=message_id)
++            _write_delivery_record(self.root, f"challenge-{challenge}.json", receipt)
++            _write_delivery_record(self.root, f"pending-{challenge}.json", {
+                 "request": request, "space_id": space_id, "message_id": message_id,
+                 "phrase": phrase, "created_at": issued_at,
+             })
+@@ -336,6 +458,8 @@
+                 pending = _read(self.root, path.name)
+                 if pending["message_id"] == target:
+                     matches.append((path, pending))
++            matches.extend((path, pending) for path, pending in self._ack_pending()
++                           if pending["message_id"] == target)
+             if not matches:
+                 for path in self.root.glob("challenge-*.json"):
+                     receipt = _read(self.root, path.name)
+@@ -347,7 +471,7 @@
+             if len(matches) != 1:
+                 raise Denied("ambiguous development approval target")
+             path, pending = matches[0]
+-            reference = path.stem.removeprefix("pending-")
++            reference = path.stem.removeprefix("pending-") if path is not None else pending["reference"]
+             receipt = _read(self.root, f"challenge-{reference}.json")
+             if (receipt.get("request") != pending["request"]
+                     or receipt.get("message_id") != pending["message_id"]
+@@ -411,7 +535,8 @@
+                 "bundle_sha256": _digest(_bytes(grant) + _bytes(receipt) + _bytes(decision)),
+                 "issued_at": now})
+             _write_once(self.root, f"grant-{reference}.json", grant)
+-            path.unlink()
++            if path is not None:
++                path.unlink()
+             return {"state": "development_approved", "reference": reference}
+ 
+     def revoke(self, *, project: str, task_id: str, peer_uid: int) -> dict:
+--- a/opt/alfred-developer-v1/developer_v1/trusted_intake_development.py
++++ b/opt/alfred-developer-v1/developer_v1/trusted_intake_development.py
+@@ -8,10 +8,8 @@
+ 
+ from __future__ import annotations
+ 
++import argparse
+ import hashlib
+-import argparse
+-import ctypes
+-import errno
+ import http.client
+ import json
+ import os
+@@ -20,6 +18,7 @@
+ import socketserver
+ import stat
+ import struct
++import sys
+ import threading
+ import time
+ import uuid
+@@ -30,15 +29,21 @@
+ from alfred.gateway.envelope import EnvelopeError, parse_envelope
+ from alfred.gateway.journal import Journal, JournalError
+ from alfred.gateway.requesters import require_bound_requester
++
+ from developer_v1.approval_transition import approval_request
+ from developer_v1.gateway_adapter import read_gateway_inputs
+-from developer_v1.owner_grants import DevelopmentGrantIssuer
++from developer_v1.owner_grants import (
++    DevelopmentGrantIssuer,
++    DevelopmentSendFailure,
++    _rename_noreplace,
++)
+ from developer_v1.publication_approval import PublicationApprovalIssuer
+-from developer_v1.router import Denied
++from developer_v1.router import ID, TASK, Denied
+ 
+ MAX_PACKET = 64 * 1024
+ MAX_EVENT_AGE = 300
+ MAX_PREVIEW = 4000
++DEVELOPMENT_SEND_TIMEOUT = 30
+ NAMESPACE = uuid.UUID("118579c1-6804-4eb9-b650-714c8386c892")
+ DRAFT_FIELDS = (
+     "title", "task_type", "objective", "scope", "requirements",
+@@ -58,6 +63,55 @@
+     def __init__(self, code: str):
+         self.code = code
+         super().__init__(code)
++
++
++def _development_failure(phase, request, exc, plan_sha256=None):
++    """Redacted journal evidence; an issuer refusal never proves no send."""
++    reasons = {
++        "expected one canonical task": "canonical_task_not_unique",
++        "canonical task lacks unique trusted Gateway filing": "canonical_filing_not_unique",
++        "CTO plan failed schema validation": "plan_schema_invalid",
++        "CTO plan does not bind canonical task": "plan_spec_binding_mismatch",
++        "CTO plan request identity mismatch": "plan_request_mismatch",
++        "plan is not ready for approval": "plan_not_ready",
++        "repository binding mismatch": "repository_mismatch",
++        "invalid authorized worktree root": "worktree_invalid",
++        "invalid scope": "scope_type_invalid",
++        "empty or duplicate scope": "scope_invalid",
++        "another development approval is pending": "another_approval_pending",
++        "existing task grant must be revoked before restaging": "existing_task_grant",
++        "development approval challenge too large": "challenge_size_limit",
++        "development approval evidence too large": "receipt_size_limit",
++        "approval challenge delivery unverified": "send_receipt_unverified",
++        "protected preview send failed": "photon_http_refused",
++        "invalid protected preview response": "photon_response_size_invalid",
++        "missing protected preview ID": "photon_receipt_missing",
++    }
++    if isinstance(exc, Denied):
++        kind = "Denied"
++    elif isinstance(exc, TimeoutError):
++        kind = "TimeoutError"
++    elif isinstance(exc, PermissionError):
++        kind = "PermissionError"
++    elif isinstance(exc, FileNotFoundError):
++        kind = "FileNotFoundError"
++    elif isinstance(exc, OSError):
++        kind = "OSError"
++    else:
++        kind = "ValueError"
++    project, task = request.get("project"), request.get("task_id")
++    number = getattr(exc, "errno", None)
++    return {
++        "schema": "alfred.development-challenge-failure/1",
++        "phase": phase,
++        "project": project if isinstance(project, str) and ID.fullmatch(project) else None,
++        "task_id": task if isinstance(task, str) and TASK.fullmatch(task) else None,
++        "plan_sha256": plan_sha256,
++        "exception_kind": kind,
++        "reason_code": exc.reason_code if isinstance(exc, DevelopmentSendFailure) else reasons.get(str(exc), "unclassified"),
++        "errno": number if type(number) is int and 0 <= number <= 4095 else None,
++        "delivery_state": exc.delivery_state if isinstance(exc, DevelopmentSendFailure) else ("not_attempted" if phase != "issuer" else "uncertain"),
++    }
+ 
+ 
+ @dataclass
+@@ -174,8 +228,11 @@
+                 raise IntakeRefused("wrong_peer")
+             if not isinstance(request.get("project"), str) or not isinstance(request.get("task_id"), str):
+                 raise IntakeRefused("invalid_development_request")
++            phase, plan_sha256 = "gateway_inputs", None
+             try:
+                 inputs = self.development_inputs(request["project"], request["task_id"])
++                plan_sha256 = hashlib.sha256(inputs.plan_raw).hexdigest()
++                phase = "approval_binding"
+                 scope = request.get("scope")
+                 if type(scope) is not list or any(type(s) is not str for s in scope):
+                     raise Denied("invalid scope")
+@@ -186,10 +243,16 @@
+                     project=request["project"], task_id=request["task_id"],
+                     repository=inputs.repository, worktree_root=Path(root), scope=scope,
+                     spec_decoder=inputs.spec_decoder)
++                phase = "issuer"
+                 return self.development_issuer.stage(prepared,
+                     space_id=request.get("space_id"), peer_uid=peer_uid,
+                     **({"plan_raw": inputs.plan_raw} if json.loads(inputs.plan_raw).get("baseline_revision") else {}))
+             except (Denied, OSError, ValueError) as exc:
++                try:
++                    print(json.dumps(_development_failure(phase, request, exc, plan_sha256),
++                                     sort_keys=True), file=sys.stderr, flush=True)
++                except OSError:
++                    pass  # Logging failure never authorizes a retry or changes the refusal.
+                 raise IntakeRefused("development_request_unavailable") from exc
+         if op in {"submit", "status"}:
+             if peer_uid != self.hermes_uid:
+@@ -483,27 +546,74 @@
+     return preview
+ 
+ 
+-def _sidecar_preview_sender(port: int, token: str):
++def _sidecar_preview_sender(port: int, token: str, *, timeout=2):
+     if not isinstance(port, int) or not 1 <= port <= 65535 or not isinstance(token, str) or not token:
+         raise ValueError("protected preview transport configuration is required")
+ 
+     def send(space_id: str, preview: str) -> str:
+         body = json.dumps({"spaceId": space_id, "text": preview, "format": "text"}).encode()
+-        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
++        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
++        development = timeout == DEVELOPMENT_SEND_TIMEOUT
++        expired = threading.Event()
++
++        def deadline():
++            expired.set()
++            if connection.sock is not None:
++                try:
++                    connection.sock.shutdown(socket.SHUT_RDWR)
++                except OSError:
++                    pass
++
++        timer = threading.Timer(timeout, deadline) if development else None
+         try:
++            if development:
++                # No HTTP bytes have been submitted if explicit connect fails.
++                timer.daemon = True
++                timer.start()
++                try:
++                    connection.connect()
++                except OSError as exc:
++                    raise DevelopmentSendFailure("not_attempted", "connect_failed") from exc
++                if expired.is_set():
++                    raise DevelopmentSendFailure("not_attempted", "connect_failed")
+             connection.request("POST", "/send", body,
+                                {"Content-Type": "application/json", "x-hermes-sidecar-token": token})
+             response = connection.getresponse()
+             if response.status != 200:
++                if development:
++                    # These are explicit local rejections before resolveSpace/send
++                    # in the pinned existing Photon handler. Generic 500s are not.
++                    if response.status in {400, 401, 405}:
++                        raise DevelopmentSendFailure("not_attempted", "http_preflight_refused")
++                    payload = response.read(1025)
++                    code = "http_failed"
++                    if len(payload) <= 1024:
++                        try:
++                            result = json.loads(payload)
++                            if type(result) is dict and result.get("error_class") == "target_not_allowed":
++                                code = "provider_refused"
++                        except ValueError:
++                            pass
++                    raise DevelopmentSendFailure("uncertain", code)
+                 raise OSError("protected preview send failed")
+             payload = response.read(1025)
+             if len(payload) > 1024:
+                 raise OSError("invalid protected preview response")
+             result = json.loads(payload)
+-            if result.get("ok") is not True or not isinstance(result.get("messageId"), str):
++            if type(result) is not dict or result.get("ok") is not True or not isinstance(result.get("messageId"), str):
+                 raise OSError("missing protected preview ID")
++            if development and (expired.is_set() or not 1 <= len(result["messageId"]) <= 200):
++                raise DevelopmentSendFailure("uncertain", "ack_timeout" if expired.is_set() else "ack_invalid")
+             return result["messageId"]
++        except DevelopmentSendFailure:
++            raise
++        except (OSError, ValueError, http.client.HTTPException) as exc:
++            if development:
++                raise DevelopmentSendFailure("uncertain", "ack_timeout" if expired.is_set() or isinstance(exc, TimeoutError) else "ack_invalid") from exc
++            raise
+         finally:
++            if timer is not None:
++                timer.cancel()
+             connection.close()
+ 
+     return send
+@@ -555,20 +665,6 @@
+         os.close(directory)
+ 
+ 
+-def _rename_noreplace(directory: int, source: str, destination: str) -> None:
+-    """Publish exactly once without exposing a hard link to the Gateway reader."""
+-    try:
+-        rename = ctypes.CDLL(None, use_errno=True).renameat2
+-    except AttributeError:
+-        raise OSError(errno.ENOSYS, "atomic no-replace rename is unavailable") from None
+-    rename.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+-                       ctypes.c_char_p, ctypes.c_uint)
+-    rename.restype = ctypes.c_int
+-    if rename(directory, os.fsencode(source), directory, os.fsencode(destination), 1) != 0:
+-        code = ctypes.get_errno()
+-        raise OSError(code, os.strerror(code), destination)
+-
+-
+ class _Handler(socketserver.BaseRequestHandler):
+     def handle(self) -> None:
+         self.request.settimeout(2)
+@@ -637,7 +733,8 @@
+         development_issuer = DevelopmentGrantIssuer(
+             Path(config["development_grant_root"]), owner_sender_id=config["owner_sender_id"],
+             sidecar_uid=config["sidecar_uid"],
+-            preview_sender=send)
++            preview_sender=_sidecar_preview_sender(config["sidecar_port"], config["sidecar_token"],
++                                                   timeout=DEVELOPMENT_SEND_TIMEOUT))
+         publication_issuer = PublicationApprovalIssuer(
+             Path(config["development_grant_root"]), owner_sender_id=config["owner_sender_id"],
+             sidecar_uid=config["sidecar_uid"], preview_sender=send,
+--- a/opt/alfred-developer-v1/developer_v1/stage_approval.py
++++ b/opt/alfred-developer-v1/developer_v1/stage_approval.py
+@@ -33,7 +33,8 @@
+                    "task_id": args.task, "worktree_root": str(args.worktree_root),
+                    "scope": args.scope, "space_id": args.space_id}
+     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+-        client.settimeout(5)
++        # Longer than Intake's bounded 30s development send; no client retries.
++        client.settimeout(40)
+         client.connect(str(args.socket))
+         client.sendall(json.dumps(request, separators=(",", ":")).encode() + b"\n")
+         response = bytearray()
+--- a/opt/alfred-developer-v1/developer_v1/release.sha256
++++ b/opt/alfred-developer-v1/developer_v1/release.sha256
+@@ -9,7 +9,7 @@
+ 5a68ba29d6d8af3af640bc8df4735e32dea3f34a61bd07f36e42e957d21f1253  developer_v1/isolated_apply.py
+ 250eb9600c4f850e2aa1a48bd6de035f23303851d7a12a6855fa39aa7810b029  developer_v1/models.codex-verified.example.json
+ b5540dfbfdd0a9ed2f333c48b3137edcfda0820185c3de98870d1d1a6914415d  developer_v1/models.example.json
+-d8e88bf8f42a0eb19e3f3d5a80d1985daf33ced47c318cd1826210799a40e463  developer_v1/owner_grants.py
++694a75e16270f39d2d7a96223c03dbdf47d95a488f30ac2a4dac321eff792be6  developer_v1/owner_grants.py
+ 2ea08665a81faa9b2bb00b1791fd13bb1be35dea686839ca8058f0904ee94fc5  developer_v1/pipeline.py
+ 827dbcaf8c3a7a420fb67acc102ff824725f1adf853134fd772100cdb52601e0  developer_v1/publication_approval.py
+ 0c29350880f3fc76af87790554afff2b3a20d974a3f94981fcc8b3cb8e460b3f  developer_v1/real_worker.py
+@@ -24,6 +24,6 @@
+ 7b034bbac34ad1d0726c0fcb5b559a922a5b0f965a2d7d2b9b9f85616a750a56  developer_v1/schemas/publication-plan.schema.json
+ e6c37c68a565e4fa3bf12341a5b3cc8c6a108ffa4533b881314c2a08e42e1ee8  developer_v1/schemas/qa-input.schema.json
+ 13b73ea63233b826b9cd30899549e2fed29d45ae0c78fe7291f941d6e90b25aa  developer_v1/specialists.json
+-98990b9e8c9ed142d9bc6d330f8521b583758f7bc523facd12ab3f99097bcdf8  developer_v1/stage_approval.py
++800f880923f42794c866fa7c9ad1c5d61679d8b9a9e21871e04599f9292f6b92  developer_v1/stage_approval.py
+ e887f5ff723c88ddb5e430ced77bb6c004978f58d971adeaa3e14335217a0a29  developer_v1/stage_publication.py
+-d3e1677cb8d7ee17ab801448e85db48fee12d88bbf21a3561e9e755eef742168  developer_v1/trusted_intake_development.py
++8caaad6b99f262e10bb01dd640fe9965a557f443818132baf4c221c9c51b3ca6  developer_v1/trusted_intake_development.py
+--- a/usr/local/lib/alfred-fresh-v1/fresh_v1/host.py
++++ b/usr/local/lib/alfred-fresh-v1/fresh_v1/host.py
+@@ -237,7 +237,9 @@
+     def intake(self, payload):
+         self.guard()
+         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+-            client.settimeout(10)
++            # Intake's development send has a 30s total deadline. Keep the
++            # existing root caller alive for its durable acknowledgement.
++            client.settimeout(40)
+             client.connect(self.p["intake_socket"])
+             client.sendall(json.dumps(payload).encode() + b"\n")
+             raw = bytearray()
+@@ -709,6 +711,7 @@
+         # Only native-confirmed new requests have these route records. Historical
+         # T-0001/T-0002 without this record are never adopted or modified.
+         journal = Path(policy["gateway_state"]) / "journal.jsonl"
++        held_challenge = False
+         for line in read_owned(journal, host.uids["alfred"]).splitlines():
+             row = json.loads(line)
+             if (
+@@ -767,11 +770,18 @@
+                 job, _ = protected_json(directory / "job.json")
+             if (directory / "complete.json").exists():
+                 continue
++            if ((directory / "development-challenge.attempt.json").exists()
++                    and not (directory / "development-challenge.result.json").exists()):
++                # Never revisit an uncertain send. It must not starve a later
++                # genuine owner request; no old evidence is modified/adopted.
++                held_challenge = True
++                continue
+             result = advance(directory, job, host)
+             if result["state"] == "complete":
+                 write_once(directory / "complete.json", result)
+             return result  # One bounded fresh task per existing timer tick.
+-        return {"state": "idle"}
++        return ({"state": "held", "reason": "development-challenge: previous attempt requires reconciliation"}
++                if held_challenge else {"state": "idle"})
+     finally:
+         os.close(fd)
+ 
+--- a/home/alfred/.hermes/hermes-agent/plugins/platforms/photon/sidecar/development-observe.mjs
++++ b/home/alfred/.hermes/hermes-agent/plugins/platforms/photon/sidecar/development-observe.mjs
+@@ -33,9 +33,10 @@
+       client.destroy();
+       resolve(value);
+     };
+-    // A preview send holds the single pending gate briefly; keep an inbound
+-    // reply queued long enough for the bounded 2s send to finish.
+-    client.setTimeout(2500, () => finish({ state: "unavailable" }));
++    // The existing Intake handles one socket request at a time. Queue a native
++    // owner reply beyond its bounded 30s development send (root caller: 40s).
++    // This changes no SDK connection or event identity.
++    client.setTimeout(45000, () => finish({ state: "unavailable" }));
+     client.on("error", () => finish({ state: "unavailable" }));
+     client.on("connect", () => client.write(body + "\n"));
+     client.on("data", (chunk) => {

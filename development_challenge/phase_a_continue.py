@@ -20,18 +20,25 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path("/")
-NAME = "alfred-fresh-v1-1.0.1-development-handoff.1"
-REVIEW = "/root/alfred-fresh-v1-development-handoff-1-review"
-ARCHIVE_SHA = "4cd5448ed005c8d1eb759ec80a8a021c23b97bf4d030bd880124e9f6043175b9"
-MANIFEST_SHA = "4392696cd25bbd38ffbe24972899ccc884041a1a8f19321a118c08154a52bb27"
-SCRIPT_SHA = "dcc6395369f16ae844fea26d131449e688b232943c16843e2a61f3804a0d0edb"
-INSTALLER_SHA = "cee25c92548ae07bf3c68a25cb0fea00f2ff54ecbe94421e80368cfa4962629f"
+NAME = "alfred-fresh-v1-1.0.1-development-handoff.2"
+REVIEW = "/root/alfred-fresh-v1-development-handoff-2-review"
+BACKUP = "/root/alfred-fresh-v1-development-handoff-2-backup"
+PAYLOAD_FILES = 23
+ARCHIVE_SHA = "0f44351cca7ff57d15efc0d535c1a479a8db7ad36ea69506eafb34e7bb264c6f"
+MANIFEST_SHA = "4083213e209cbdbeec41de9837f962d0a9c9d3ac3bc53deec9cd0dc7f1a48bfd"
+SCRIPT_SHA = "8ae5244a94cf2e51a5c19492c8ea80bd6ad8178cefc1763c621677164a1cc95c"
+INSTALLER_SHA = "f88b3f8ce01534ff256ff3773ee01be6e6df005b97156a62203215492981133d"
 CONTEXT_SHA = "bda345a14ec110cf5b3118d7289204c304ba13795f9c9677351aa940d0ab198e"
 PLAN_SHA = "e5b58519eb9943c7b9d093b19880c4a0c881dc5a2491c6e1c68b70ff10f032d6"
 SPEC_SHA = "2474942d42eef568c150fda9da76601fe4b3bcd946546a22ca9ec6eeeaf22f58"
 TASK = "/var/lib/alfred-v1-handoffs/dev-v1-accept/T-0003"
 GRANTS = "/var/lib/alfred-development-grants"
 PLAN = "/home/alfred/Alfred/gateway/cto-plans/dev-v1-accept-T-0003.json"
+# The one unchanged dependency whose established owner is not root. Its digest,
+# type, single link and no group/other write checks are unchanged.
+DEPENDENCY_OWNERS = {
+    "/home/alfred/.hermes/hermes-agent/plugins/platforms/photon/sidecar/index.mjs": "alfred"
+}
 UNITS = (
     "alfred-development-gateway.service",
     "alfred-development-evidence.service",
@@ -91,8 +98,8 @@ def read(path, *, uid=None, private=False):
     return raw
 
 
-def pinned(path, sha, *, private=False):
-    raw = read(path, uid=os.geteuid(), private=private)
+def pinned(path, sha, *, private=False, uid=None):
+    raw = read(path, uid=os.geteuid() if uid is None else uid, private=private)
     require(digest(raw) == sha, "sha256_mismatch: " + str(path))
     return raw
 
@@ -131,7 +138,7 @@ def verify_package():
         )
         inventory[name] = sha
         pinned(release / name, sha)
-    require(len(inventory) == 21, "release_inventory_count")
+    require(len(inventory) == PAYLOAD_FILES, "release_inventory_count")
     actual = set()
     for p in release.rglob("*"):
         require(not p.is_symlink(), "release_symlink")
@@ -149,7 +156,8 @@ def verify_package():
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
         members = tar.getmembers()
         require(
-            len(members) == 22 and len({m.name for m in members}) == 22,
+            len(members) == PAYLOAD_FILES + 1
+            and len({m.name for m in members}) == PAYLOAD_FILES + 1,
             "archive_inventory_count",
         )
         for member in members:
@@ -168,7 +176,7 @@ def verify_package():
             )
     pinned(release / "development_challenge/install_patch.py", INSTALLER_SHA)
     require(
-        not os.path.lexists(host("/root/alfred-fresh-v1-development-handoff-1-backup")),
+        not os.path.lexists(host(BACKUP)),
         "installation_backup_already_exists",
     )
     return release
@@ -284,8 +292,14 @@ def installed(release):
         read(release / "development_challenge/installed-sha256.json", uid=os.geteuid())
     )
     require(len(pins) == 14, "installed_contract_count")
+    require(
+        set(DEPENDENCY_OWNERS) <= set(pins), "dependency_owner_exception_outside_pins"
+    )
     for name, sha in pins.items():
-        pinned(host(name), sha)
+        owner = DEPENDENCY_OWNERS.get(name)
+        uid = None if owner is None else pwd.getpwnam(owner).pw_uid
+        require(uid != 0, "dependency_owner_exception_privileged: " + name)
+        pinned(host(name), sha, uid=uid)
     seen = set()
     for line in (
         read(

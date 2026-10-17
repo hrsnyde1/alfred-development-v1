@@ -232,7 +232,7 @@ def test_preflight_rejects_unsafe_state_without_writes(fixture, monkeypatch, bad
             0o600,
         )
     elif bad == "backup":
-        target("/root/alfred-fresh-v1-development-handoff-1-backup").mkdir()
+        target(preparation.BACKUP).mkdir()
     elif bad == "inventory":
         write(
             target(preparation.REVIEW + "/" + preparation.NAME + "/extra"),
