@@ -322,8 +322,14 @@ class IndependentReviewerTests(unittest.TestCase):
 
     def test_20_release_manifest_and_tamper_rejection(self):
         source = Path(__file__).resolve().parents[1] / "independent_reviewer"
-        pinned = source / "host-candidate-v4/independent_reviewer"
-        pin = "f6f789de9a8bb5e4e6b9dd67db9decc5e8ee760c203ebba6a45ef61532cc5832"
+        # v4 is the installed predecessor; v5 (handoff.6) accepts Codex progress notes
+        # before the single final decision and is the current source.
+        self.assertEqual(host_release.verify(
+            source / "host-candidate-v4/independent_reviewer",
+            "f6f789de9a8bb5e4e6b9dd67db9decc5e8ee760c203ebba6a45ef61532cc5832"),
+            "f6f789de9a8bb5e4e6b9dd67db9decc5e8ee760c203ebba6a45ef61532cc5832")
+        pinned = source / "host-candidate-v5/independent_reviewer"
+        pin = "62481e522cb78e1284d49a49f6a377773e80485a587c941a052427c0afd4efbe"
         self.assertEqual(host_release.verify(pinned, pin), pin)
         self.assertTrue(all((source / name).read_bytes() == (pinned / name).read_bytes()
                             for name in host_release.FILES))
