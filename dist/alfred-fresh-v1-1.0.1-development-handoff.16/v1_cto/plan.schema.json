@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "alfred.cto-plan/1",
+  "type": "object",
+  "required": [
+    "schema",
+    "project",
+    "task_id",
+    "request_id",
+    "spec_sha256",
+    "approval_state",
+    "clarification_required",
+    "objective",
+    "scope",
+    "repository",
+    "repository_evidence",
+    "implementation_approach",
+    "expected_components_files",
+    "developer_work_items",
+    "developer_deliverables",
+    "qa_checklist",
+    "independent_review_criteria",
+    "dependencies_integrations",
+    "risks_blockers",
+    "clarification_questions",
+    "acceptance_criteria",
+    "owner_summary",
+    "planning_note",
+    "delivery"
+  ],
+  "properties": {
+    "schema": {
+      "const": "alfred.cto-plan/1"
+    },
+    "project": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,31}$"
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^T-[0-9]{4}$"
+    },
+    "request_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "spec_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "approval_state": {
+      "const": "awaiting_development_approval"
+    },
+    "clarification_required": {
+      "type": "boolean"
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scope": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repository": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repository_evidence": {
+      "type": "object",
+      "required": [
+        "files",
+        "web_files",
+        "test_files",
+        "inspected_files"
+      ],
+      "properties": {
+        "files": {
+          "$ref": "#/$defs/strings"
+        },
+        "web_files": {
+          "$ref": "#/$defs/strings"
+        },
+        "test_files": {
+          "$ref": "#/$defs/strings"
+        },
+        "inspected_files": {
+          "$ref": "#/$defs/strings"
+        }
+      },
+      "additionalProperties": false
+    },
+    "implementation_approach": {
+      "type": "string",
+      "minLength": 1
+    },
+    "expected_components_files": {
+      "$ref": "#/$defs/strings"
+    },
+    "developer_work_items": {
+      "$ref": "#/$defs/strings"
+    },
+    "developer_deliverables": {
+      "$ref": "#/$defs/strings"
+    },
+    "qa_checklist": {
+      "$ref": "#/$defs/strings"
+    },
+    "independent_review_criteria": {
+      "$ref": "#/$defs/strings"
+    },
+    "dependencies_integrations": {
+      "$ref": "#/$defs/strings"
+    },
+    "risks_blockers": {
+      "$ref": "#/$defs/strings"
+    },
+    "clarification_questions": {
+      "$ref": "#/$defs/strings"
+    },
+    "acceptance_criteria": {
+      "type": "string",
+      "minLength": 1
+    },
+    "owner_summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "planning_note": {
+      "type": "string",
+      "minLength": 1
+    },
+    "delivery": {
+      "type": "object",
+      "required": [
+        "state",
+        "message_id"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "pending",
+            "attempted_uncertain",
+            "delivered"
+          ]
+        },
+        "message_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "baseline_revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "team_skills": {
+      "type": "object",
+      "required": ["library_commit", "role", "skills"],
+      "properties": {
+        "library_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "role": {"const": "cto"},
+        "skills": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": ["id", "title", "sha256", "tokens"],
+            "properties": {
+              "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$"},
+              "title": {"type": "string", "minLength": 1, "maxLength": 120},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "tokens": {"type": "integer", "minimum": 1}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "strings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

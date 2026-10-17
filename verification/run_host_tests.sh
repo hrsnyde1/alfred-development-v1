@@ -97,10 +97,18 @@ run handoff12 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_multi_pro
 run handoff14 "$PYTHON" -B -m pytest -q -p no:cacheprovider \
   tests/test_development_handoff14_upgrade.py --junitxml="$OUT/handoff14.xml"
 
-# handoff.15: the team fixes its own work (up to three rounds); team skills alongside.
-run handoff15 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_fix_loop.py \
-  tests/test_development_handoff15_upgrade.py tests/test_team_skills.py \
-  tests/test_independent_qa.py --junitxml="$OUT/handoff15.xml"
+# handoff.16: team skills (handoff.13 rebuilt with the Gateway owner rule).
+run handoff16 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_team_skills.py \
+  tests/test_development_handoff16_upgrade.py --junitxml="$OUT/handoff16.xml"
+
+# handoff.17: the team fixes its own work (handoff.15 repackaged without Gateway pins).
+run handoff17 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_fix_loop.py \
+  tests/test_development_handoff15_upgrade.py tests/test_development_handoff17_upgrade.py \
+  tests/test_independent_qa.py --junitxml="$OUT/handoff17.xml"
+
+# handoff.18: the demo site's lab repository is writable in the Evidence sandbox.
+run handoff18 "$PYTHON" -B -m pytest -q -p no:cacheprovider \
+  tests/test_development_handoff18_upgrade.py --junitxml="$OUT/handoff18.xml"
 
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
