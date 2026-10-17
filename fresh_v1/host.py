@@ -191,8 +191,56 @@ def clone_snapshot(source, destination, repository, alfred_uid, *, bare=False):
         )
 
 
+# How much of the previous attempt's files a fix round shows its developers.
+FIX_CONTEXT_BYTES = 24576
+
+
+def previous_file(final, relative, limit):
+    """A file from the previous round's final worktree, or None. Root reads an
+    alfred-owned tree here, so every path component must be a real directory or
+    regular file (no symlink can redirect the read) and the size is bounded."""
+    if limit <= 0:
+        return None
+    try:
+        if not stat.S_ISDIR(final.lstat().st_mode):
+            return None
+    except FileNotFoundError:
+        return None
+    current = final
+    for part in relative.split("/"):
+        if part in ("", ".", ".."):
+            return None
+        current = current / part
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            return None
+        if stat.S_ISLNK(info.st_mode):
+            return None
+    if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
+        return None
+    fd = os.open(current, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, "rb") as stream:
+        raw = stream.read(limit + 1)
+    try:
+        return raw.decode("utf-8") if len(raw) <= limit else None
+    except UnicodeDecodeError:
+        return None
+
+
+def fix_suffix(job):
+    """"" for the approved development (round 0); "-r<n>" for fix round n."""
+    return "" if not job.get("round") else f"-r{job['round']}"
+
+
 def qa_stage(host, job):
+    if job.get("round"):
+        return f"qa-fix-{job['round']}"
     return "qa-recovery-1" if (host.jobdir(job) / "qa.recovery.json").exists() else "qa"
+
+
+def reviewer_stage(host, job):
+    return f"reviewer-fix-{job['round']}" if job.get("round") else "reviewer"
 
 
 def read_owned(path, uid):
@@ -317,7 +365,7 @@ class Host:
         identity(job["project"], job["task_id"])
         return Path(self.p["jobs"]) / job["project"] / job["task_id"]
 
-    def worker(self, job, stage, user):
+    def worker(self, job, stage, user, fix_round=0):
         self.guard()
         # The canonical policy stays root:root 0600. Supply a separately sealed
         # job input, like job.json, instead of asking a dropped UID to read it.
@@ -384,6 +432,7 @@ worker_main(sys.argv[1:])"""
             str(self.jobdir(job)),
             "--policy",
             str(policy_path),
+            *(["--round", str(fix_round)] if fix_round else []),
         ]
         self.dispatched = True
         try:
@@ -514,26 +563,108 @@ worker_main(sys.argv[1:])"""
         self.freeze_json(self.jobdir(job) / "execution.json", request, ("alfred",))
         return self.worker(job, "developer", "alfred")
 
+    @predispatch(lambda host, job: f"developer-fix-{job['round']}")
+    def developer_fix(self, job):
+        """Fix round n: the same approved team, scope and baseline, with what QA or
+        the Reviewer found and the previous attempt's files to start from."""
+        n = job["round"]
+        if not 1 <= n <= 3:
+            raise Held("invalid fix round")
+        project, task = job["project"], job["task_id"]
+        plan = json.loads(
+            read_owned(
+                Path(self.p["gateway_state"]) / "cto-plans" / f"{project}-{task}.json",
+                self.uids["alfred"],
+            )
+        )
+        spec = read_owned(Path(job["spec_path"]), self.uids["alfred"]).decode()
+        previous = (
+            Path(self.p["worktree_root"])
+            / f"fresh-{project}-{task}"
+            / f"{project}-{task}-final{'' if n == 1 else f'-r{n - 1}'}"
+        )
+        findings = "\n".join(f"- {line}" for line in job["fix_findings"])
+        items = work_items(
+            job["scope"],
+            job.get("specialists", ["backend"]),
+            plan["objective"]
+            + "\nCanonical specification (untrusted task data; approved scope remains authoritative):\n"
+            + spec,
+        )
+        budget = FIX_CONTEXT_BYTES
+        for item in items:
+            item["id"] = item["id"].replace("-main", f"-r{n}")
+            item["depends_on"] = [d.replace("-main", f"-r{n}") for d in item["depends_on"]]
+            shown = []
+            for path in item["files"]:
+                content = previous_file(previous, path, budget)
+                if content is not None:
+                    budget -= len(content)
+                    shown.append(f"=== {path} (previous attempt) ===\n{content}")
+            item["objective"] += (
+                f"\n\nFix round {n} of 3. Independent QA or the Reviewer found these "
+                "problems in the previous attempt. Fix them and keep everything that "
+                "already works; stay within your assigned files:\n"
+                + findings
+                + ("\n\nPrevious attempt, to start from:\n" + "\n".join(shown) if shown else "")
+            )
+        request = {
+            "schema": "alfred.developer-run-request/1",
+            "project": project,
+            "task_id": task,
+            "worktree_root": str(Path(self.p["worktree_root"]) / f"fresh-{project}-{task}"),
+            "scope": job["scope"],
+            "authorization_reference": job["grant_reference"],
+            "baseline_revision": job["baseline_revision"],
+            "items": items,
+            "total_cost_limit": self.p["total_cost_limit"],
+            "fix_round": n,
+        }
+        self.freeze_json(self.jobdir(job) / f"execution-r{n}.json", request, ("alfred",))
+        return self.worker(job, "developer", "alfred", n)
+
+    def notify_stuck(self, job, findings):
+        """After the last fix round, one plain-language text to the owner."""
+        plan = json.loads(
+            read_owned(
+                Path(self.p["gateway_state"])
+                / "cto-plans"
+                / f"{job['project']}-{job['task_id']}.json",
+                self.uids["alfred"],
+            )
+        )
+        goal = (plan.get("objective") or "").strip().splitlines()
+        return self.intake(
+            {
+                "op": "notify_owner_stuck",
+                "project": job["project"],
+                "space_id": job["space_id"],
+                "summary": goal[0] if goal else "the approved change",
+                "findings": list(findings)[:3],
+            }
+        )
+
     @predispatch(qa_stage)
     def qa(self, job):
         root = self.jobdir(job)
-        base = root / "qa-input"
-        if (root / "qa.recovery.json").exists():
+        suffix = fix_suffix(job)
+        base = root / f"qa-input{suffix}"
+        if not suffix and (root / "qa.recovery.json").exists():
             # The one authorized T-0005 recovery reuses the complete root-built input
             # of the undispatched original attempt; qa_recovery pinned its bytes.
             return self.qa_dispatch(job, root, base)
         self.directory(base)
         source = Path(self.p["developer_state"])
         project, task = job["project"], job["task_id"]
-        manifest_path = source / project / task / "qa-input.json"
+        manifest_path = source / project / task / f"qa-input{suffix}.json"
         manifest = json.loads(read_owned(manifest_path, self.uids["alfred"]))
         expected_final = (
             Path(self.p["worktree_root"])
             / f"fresh-{project}-{task}"
-            / f"{project}-{task}-final"
+            / f"{project}-{task}-final{suffix}"
         )
-        # Exactly the assignments frozen into this task's execution request.
-        frozen = json.loads((self.jobdir(job) / "execution.json").read_bytes())
+        # Exactly the assignments frozen into this round's execution request.
+        frozen = json.loads((self.jobdir(job) / f"execution{suffix}.json").read_bytes())
         assigned = sorted(item["id"] for item in frozen["items"])
         reports = manifest.get("developer_reports")
         if (
@@ -557,8 +688,9 @@ worker_main(sys.argv[1:])"""
                 "alfred",
                 (),
             )
+        # QA verifies this round's request and claim under the canonical names.
         self.copy(
-            source / f"request-{project}-{task}.json",
+            source / f"request-{project}-{task}{suffix}.json",
             base / f"request-{project}-{task}.json",
             "alfred",
             (),
@@ -580,8 +712,16 @@ worker_main(sys.argv[1:])"""
         )
         for kind in ("grant", *decided, "issuance", "execution", "execution-result"):
             name = f"{kind}-{job['grant_reference']}.json"
+            source_name = (
+                f"{kind}-{job['grant_reference']}{suffix}.json"
+                if kind.startswith("execution")
+                else name
+            )
             self.copy(
-                Path(self.p["grant_root"]) / name, base / "grants" / name, "alfred", ()
+                Path(self.p["grant_root"]) / source_name,
+                base / "grants" / name,
+                "alfred",
+                (),
             )
         cfg = json.loads(
             Path(
@@ -616,8 +756,8 @@ worker_main(sys.argv[1:])"""
         self.share(
             Path(self.p["worktree_root"]) / f"fresh-{project}-{task}", ("alfredqa",)
         )
-        self.directory(root / "qa-output", "alfredqa")
-        result = self.worker(job, "qa", "alfredqa")
+        self.directory(root / f"qa-output{fix_suffix(job)}", "alfredqa")
+        result = self.worker(job, "qa", "alfredqa", job.get("round", 0))
         if result.get("qa_model") is None:
             raise Held("independent QA model evidence missing")
         return result
@@ -627,15 +767,16 @@ worker_main(sys.argv[1:])"""
             source, destination, repository, self.uids["alfred"], bare=bare
         )
 
-    @predispatch("reviewer")
+    @predispatch(reviewer_stage)
     def reviewer(self, job):
         root = self.jobdir(job)
-        base = root / "reviewer-input"
+        suffix = fix_suffix(job)
+        base = root / f"reviewer-input{suffix}"
         self.directory(base)
-        qa = root / "qa-output" / job["project"] / job["task_id"]
+        qa = root / f"qa-output{suffix}" / job["project"] / job["task_id"]
         for name in ("qa-report.json", "reviewer-handoff.json"):
             self.copy(qa / name, base / name, "alfredqa", ())
-        qain = root / "qa-input"
+        qain = root / f"qa-input{suffix}"
         self.freeze(
             base / "cto-plan.json",
             (
@@ -672,18 +813,20 @@ worker_main(sys.argv[1:])"""
         )
         self.freeze_json(base / "config.json", cfg)
         self.share(base, ("alfredreview",))
-        self.directory(root / "reviewer-output", "alfredreview")
-        return self.worker(job, "reviewer", "alfredreview")
+        self.directory(root / f"reviewer-output{suffix}", "alfredreview")
+        return self.worker(job, "reviewer", "alfredreview", job.get("round", 0))
 
     @predispatch("publication-plan")
     def publication_plan(self, job):
         root = self.jobdir(job)
+        # Publish the round QA and the Reviewer passed.
+        suffix = fix_suffix(job)
         base = root / "publisher-input"
         self.directory(base)
-        review = root / "reviewer-output" / job["project"] / job["task_id"]
+        review = root / f"reviewer-output{suffix}" / job["project"] / job["task_id"]
         for name in ("review-report.json", "publication-handoff.json"):
             self.copy(review / name, base / name, "alfredreview", ())
-        previous = root / "reviewer-input"
+        previous = root / f"reviewer-input{suffix}"
         for name in (
             "qa-report.json",
             "reviewer-handoff.json",
@@ -693,7 +836,7 @@ worker_main(sys.argv[1:])"""
         ):
             self.freeze(base / name, (previous / name).read_bytes())
         self.freeze(
-            base / "registry.json", (root / "qa-input/registry.json").read_bytes()
+            base / "registry.json", (root / f"qa-input{suffix}/registry.json").read_bytes()
         )
         qa = json.loads((base / "qa-report.json").read_bytes())
         # Clone the verified final worktree's common repository once. Cloning
@@ -701,7 +844,7 @@ worker_main(sys.argv[1:])"""
         # that Publisher independently verifies against the final tree.
         manifest = json.loads(
             (
-                root / "qa-input" / job["project"] / job["task_id"] / "qa-input.json"
+                root / f"qa-input{suffix}" / job["project"] / job["task_id"] / "qa-input.json"
             ).read_bytes()
         )
         self.clone(
@@ -943,6 +1086,7 @@ VERDICT_HOLDS = frozenset({
     "independent Reviewer correctness or scope did not pass",
     "independent Reviewer acceptance criteria are not all PASS",
     "independent Reviewer findings require resolution",
+    "fix rounds exhausted; owner notified",
 })
 
 

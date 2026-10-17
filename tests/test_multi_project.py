@@ -175,12 +175,13 @@ def test_a_held_task_does_not_block_the_next_request(world):
     from fresh_v1.protected import protected_json
     from tests.test_fresh_v1 import OWNER, save
 
-    # The first request is held for good: its Reviewer requested changes.
+    # The first request is held for good: its Reviewer kept requesting changes
+    # through every automatic fix round.
     world.review_decision = "CHANGES_REQUESTED"
     world.submit()
     world.tick()
     world.approve_development()
-    assert world.tick() == {"state": "held", "reason": "independent Reviewer did not approve"}
+    assert world.tick() == {"state": "held", "reason": "fix rounds exhausted; owner notified"}
     held_job = world.jobdir(world.job)
     evidence = {p.name: p.read_bytes() for p in held_job.glob("*.json")}
     world.github.pr_list = []

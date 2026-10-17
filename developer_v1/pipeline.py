@@ -36,8 +36,11 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
                      grant_environment: str = "host", baseline_revision: str | None = None,
                      delegation_policy: Path | None = None,
                      team_skills_root: Path = team_skills.ROOT,
-                     team_skills_owner: int = 0) -> tuple[list[dict], dict]:
-    """Runs only after protected authority verifies the exact Gateway inputs."""
+                     team_skills_owner: int = 0, fix_round: int = 0) -> tuple[list[dict], dict]:
+    """Runs only after protected authority verifies the exact Gateway inputs.
+
+    fix_round > 0 redoes the same approved work from the same baseline after QA or
+    the Reviewer found problems; the items' objectives carry those findings."""
     approved_baseline = json.loads(inputs.plan_raw).get("baseline_revision")
     if baseline_revision is not None and approved_baseline != baseline_revision:
         raise Denied("baseline differs from the owner-approved CTO plan")
@@ -91,24 +94,27 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
     authority.claim(grant_reference, expected, run_sha256=_digest({
         "project": project, "task_id": task_id, "items": assignments,
         "scope": scope, "models": models, "overrides": overrides,
-        "total_cost_limit": total_cost_limit}))
+        "total_cost_limit": total_cost_limit}), fix_round=fix_round)
     try:
         result = _execute_claimed(inputs, dispatch, assignments, choices,
                                   worktree_root, state_root, project, task_id,
-                                  broker, checks, authority, baseline_revision, skills)
+                                  broker, checks, authority, baseline_revision, skills,
+                                  fix_round)
     except BaseException as exc:
-        authority.finish(grant_reference, status="failed" if isinstance(exc, Exception) else "uncertain")
+        authority.finish(grant_reference, status="failed" if isinstance(exc, Exception) else "uncertain",
+                         fix_round=fix_round)
         raise
-    authority.finish(grant_reference, status="completed")
+    authority.finish(grant_reference, status="completed", fix_round=fix_round)
     return result
 
 
 def _execute_claimed(inputs, dispatch, assignments, choices, worktree_root,
                      state_root, project, task_id, broker, checks, authority, baseline_revision,
-                     skills=()):
+                     skills=(), fix_round=0):
     state = AssignmentStore(state_root / project / task_id)
     # A single final branch carries every completed developer commit to QA.
-    final = create_worktree(inputs.repository, worktree_root, project, task_id, "final", baseline_revision)
+    final = create_worktree(inputs.repository, worktree_root, project, task_id,
+                            "final" if fix_round == 0 else f"final-r{fix_round}", baseline_revision)
     reports = []
     remaining_items = {item["id"]: item for item in assignments}
     while remaining_items:

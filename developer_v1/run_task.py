@@ -43,10 +43,11 @@ def main(argv=None) -> None:
     parser.add_argument("--grant-root", type=Path, required=True)
     parser.add_argument("--state-root", type=Path, required=True)
     args = parser.parse_args(argv)
-    request = _protected_json(args.request, 16384)
+    # Fix rounds carry findings and the previous attempt's files (bounded by the host).
+    request = _protected_json(args.request, 65536)
     required = {"schema", "project", "task_id", "worktree_root", "scope",
                 "authorization_reference", "items", "total_cost_limit"}
-    if not required <= set(request) or set(request) - required - {"model_overrides", "baseline_revision"}:
+    if not required <= set(request) or set(request) - required - {"model_overrides", "baseline_revision", "fix_round"}:
         raise Denied("host run request fields invalid")
     if request["schema"] != "alfred.developer-run-request/1":
         raise Denied("host run request schema invalid")
@@ -58,8 +59,11 @@ def main(argv=None) -> None:
         grant_reference=request["authorization_reference"], grant_root=args.grant_root,
         items=request["items"], models=models, state_root=args.state_root,
         total_cost_limit=request["total_cost_limit"],
-        overrides=request.get("model_overrides"), baseline_revision=request.get("baseline_revision"))
-    output = args.state_root / request["project"] / request["task_id"] / "qa-input.json"
+        overrides=request.get("model_overrides"), baseline_revision=request.get("baseline_revision"),
+        fix_round=request.get("fix_round", 0))
+    fix_round = request.get("fix_round", 0)
+    output = (args.state_root / request["project"] / request["task_id"]
+              / ("qa-input.json" if fix_round == 0 else f"qa-input-r{fix_round}.json"))
     fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "w") as stream:
         json.dump(qa, stream, sort_keys=True)

@@ -315,7 +315,10 @@ def verify(manifest_path: Path, report_dir: Path, registry: Path, gateway_state:
                 "approved_scope", "Assignment baseline or scope mismatch")
         modified = changed_paths(developer_tree, base, revs[0])
         declared = {r.get("path"): r.get("sha256") for r in report["files_modified"] if type(r) is dict}
-        require(set(modified) == set(declared) == set(report["assigned_scope"]),
+        # The assignment bounds what may change; a request rarely needs every file
+        # (dark mode leaves the API alone). At least one change, none outside it.
+        require(modified and set(modified) == set(declared) and
+                set(modified) <= set(report["assigned_scope"]),
                 "changed_files", "Actual Developer changes differ from assignment")
         for p in modified:
             blob = git(developer_tree, "show", f"{revs[0]}:{p}", binary=True)

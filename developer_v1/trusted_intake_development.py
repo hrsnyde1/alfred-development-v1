@@ -217,6 +217,23 @@ class IntakeGate:
                             request.get("reference"), peer_uid=peer_uid)}
             except (Denied, OSError, ValueError) as exc:
                 raise IntakeRefused("publication_authorization_unavailable") from exc
+        if op == "notify_owner_stuck":
+            # After the last automatic fix round: one plain-language text, root only.
+            if peer_uid != 0 or self.preview_sender is None:
+                raise IntakeRefused("wrong_peer")
+            project, space_id = request.get("project"), request.get("space_id")
+            summary, findings = request.get("summary"), request.get("findings")
+            if (type(project) is not str or type(space_id) is not str or not space_id
+                    or type(summary) is not str or type(findings) is not list
+                    or len(findings) > 3 or any(type(f) is not str for f in findings)):
+                raise IntakeRefused("invalid_stuck_notice")
+            text = _stuck_text(self._display_name(project) if self.registry_path else project,
+                               summary, findings)
+            try:
+                message_id = self.preview_sender(space_id, text)
+            except (OSError, ValueError, TimeoutError) as exc:
+                raise IntakeRefused("stuck_notice_unavailable") from exc
+            return {"state": "sent", "message_id": message_id}
         if op == "revoke_development_grant":
             if peer_uid != 0 or self.development_issuer is None:
                 raise IntakeRefused("wrong_peer")
@@ -592,6 +609,18 @@ def _empty_draft() -> dict[str, str]:
             "scope": "Pending.", "requirements": "Pending.", "constraints": "Pending.",
             "acceptance_criteria": "- [ ] Pending", "security_considerations": "Pending.",
             "testing_requirements": "Pending."}
+
+
+def _stuck_text(project: str, summary: str, findings: list[str]) -> str:
+    def line(value: str, limit: int) -> str:
+        text = " ".join(value.split())
+        return text if len(text) <= limit else text[: limit - 1] + "…"
+
+    problems = "\n".join(f"- {line(f, 200)}" for f in findings) or "- (no details recorded)"
+    return (f"I couldn't finish this one: {line(summary, 200)} ({line(project, 80)}).\n"
+            "The team tried 3 rounds of fixes, but it still isn't passing review:\n"
+            f"{problems}\n"
+            "Nothing was published. Tell me what to change, or send a new request.")
 
 
 def _preview_text(utterance: str, draft: dict[str, Any], digest: str, *, project: str) -> str:

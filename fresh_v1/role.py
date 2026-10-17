@@ -193,6 +193,9 @@ def main(argv=None):
     )
     parser.add_argument("--job", type=Path, required=True)
     parser.add_argument("--policy", type=Path, required=True)
+    # Fix rounds after QA or the Reviewer found problems; round 0 keeps the
+    # original file names.
+    parser.add_argument("--round", type=int, default=0, choices=range(4))
     args = parser.parse_args(argv)
     try:
         policy, _ = protected_json(args.policy)
@@ -220,6 +223,7 @@ def main(argv=None):
         or job["project"] != policy["project"]
     ):
         raise ValueError("job outside activated policy")
+    suffix = "" if args.round == 0 else f"-r{args.round}"
     if args.stage == "plan":
         output = prepare_plan(job, policy)
     elif args.stage == "developer":
@@ -228,10 +232,10 @@ def main(argv=None):
 
         from developer_v1 import run_task
 
-        request, _ = protected_json(args.job / "execution.json")
+        request, _ = protected_json(args.job / f"execution{suffix}.json")
         request_path = (
             Path(policy["developer_state"])
-            / f"request-{job['project']}-{job['task_id']}.json"
+            / f"request-{job['project']}-{job['task_id']}{suffix}.json"
         )
         write_once(request_path, request)
         with redirect_stdout(io.StringIO()):
@@ -257,10 +261,10 @@ def main(argv=None):
     elif args.stage == "qa":
         from independent_qa.worker import run
 
-        base = args.job / "qa-input"
+        base = args.job / f"qa-input{suffix}"
         output = run(
             base / job["project"] / job["task_id"] / "qa-input.json",
-            args.job / "qa-output",
+            args.job / f"qa-output{suffix}",
             base / "registry.json",
             base / "gateway",
             base / "grants",
@@ -269,7 +273,7 @@ def main(argv=None):
     elif args.stage == "reviewer":
         from independent_reviewer.worker import run
 
-        base = args.job / "reviewer-input"
+        base = args.job / f"reviewer-input{suffix}"
         output = run(
             base / "reviewer-handoff.json",
             base / "qa-report.json",
@@ -278,7 +282,7 @@ def main(argv=None):
             base / "grant.json",
             base / "spec.md",
             base / "config.json",
-            args.job / "reviewer-output",
+            args.job / f"reviewer-output{suffix}",
         )
     elif args.stage in {"prepare", "publish"}:
         from draft_pr_publisher.worker import prepare, publish

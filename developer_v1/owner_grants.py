@@ -32,6 +32,15 @@ PERMISSIONS = {"read_scoped", "write_scoped", "run_approved_check", "git_local_c
 DELEGATION_POLICY = Path("/etc/alfred-development/delegation.json")
 DELEGATION_SCHEMA = "alfred.development-delegation-policy/1"
 PROJECT_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,63}\Z")
+# Automatic fix rounds after QA or the Reviewer found problems (owner's choice).
+MAX_FIX_ROUNDS = 3
+
+
+def _round_name(reference: str, fix_round: int) -> str:
+    """Round 0 keeps the original record names; fix rounds add -r<n>."""
+    return f"{reference}.json" if fix_round == 0 else f"{reference}-r{fix_round}.json"
+
+
 OWNER_SOURCE = "photon_native_owner_reply"
 DELEGATED_SOURCE = "delegated_owner_policy"
 
@@ -383,29 +392,46 @@ class ProtectedDevelopmentAuthority:
             _verify_evidence(self.root, reference, grant, expected)
         return grant
 
-    def claim(self, reference: str, expected: dict, *, run_sha256: str) -> dict:
-        """Durably consume one grant before any worktree or model operation."""
+    def claim(self, reference: str, expected: dict, *, run_sha256: str,
+              fix_round: int = 0) -> dict:
+        """Durably consume one grant before any worktree or model operation.
+
+        Round 0 is the approved development. Fix rounds 1 to MAX_FIX_ROUNDS redo the
+        same approved work after QA or the Reviewer found problems: same plan, scope
+        and specialists, each round claimed once and only after the previous round
+        completed."""
         grant = self.verify(reference, expected)
         if not isinstance(run_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", run_sha256):
             raise Denied("invalid execution request digest")
+        if type(fix_round) is not int or not 0 <= fix_round <= MAX_FIX_ROUNDS:
+            raise Denied("invalid fix round")
+        if fix_round:
+            try:
+                previous = _read(self.root, "execution-result-" + _round_name(reference, fix_round - 1))
+            except (FileNotFoundError, OSError, ValueError) as exc:
+                raise Denied("previous round has no recorded outcome") from exc
+            if previous.get("status") != "completed":
+                raise Denied("previous round did not complete")
         record = {"schema": "alfred.development-execution-claim/1",
                   "reference": reference, "project": grant["project"],
                   "task_id": grant["task_id"], "grant_sha256": _digest(grant),
                   "run_sha256": run_sha256, "claimed_at": self.clock(),
                   "status_if_no_result": "uncertain"}
         try:
-            _write_once(self.root, f"execution-{reference}.json", record)
+            _write_once(self.root, "execution-" + _round_name(reference, fix_round), record)
         except FileExistsError as exc:
             raise Denied("development grant already consumed") from exc
         return record
 
-    def finish(self, reference: str, *, status: str) -> None:
+    def finish(self, reference: str, *, status: str, fix_round: int = 0) -> None:
         if (not isinstance(reference, str) or not REF.fullmatch(reference)
-                or status not in {"completed", "failed", "uncertain"}):
+                or status not in {"completed", "failed", "uncertain"}
+                or type(fix_round) is not int or not 0 <= fix_round <= MAX_FIX_ROUNDS):
             raise Denied("invalid execution terminal status")
-        claim = _read(self.root, f"execution-{reference}.json")
+        name = _round_name(reference, fix_round)
+        claim = _read(self.root, f"execution-{name}")
         try:
-            _write_once(self.root, f"execution-result-{reference}.json", {
+            _write_once(self.root, f"execution-result-{name}", {
                 "schema": "alfred.development-execution-result/1",
                 "reference": reference, "claim_sha256": _digest(claim),
                 "status": status, "recorded_at": self.clock()})
