@@ -1009,9 +1009,26 @@ worker_main(sys.argv[1:])"""
             self.share(path.parent, ("alfredpublish",))
         return {"path": str(path)}
 
-    @predispatch("publisher")
+    @predispatch(lambda host, job: job.get("publish_stage", "publisher"))
     def publish(self, job):
         return self.worker(job, "publish", "alfredpublish")
+
+    def publish_retry_authorized(self, job, n):
+        """The owner's root-written `alfred-dev-ops republish` record for retry n."""
+        path = self.jobdir(job) / f"publisher-retry-{n}.json"
+        if not path.exists():
+            return False
+        record, _ = protected_json(path)
+        if record != {
+            "schema": "alfred.publisher-retry/1",
+            "project": job["project"],
+            "task_id": job["task_id"],
+            "n": n,
+            "authorized_by": record.get("authorized_by"),
+            "authorized_at": record.get("authorized_at"),
+        }:
+            raise Held("publisher retry authorization invalid")
+        return True
 
     @predispatch("completion")
     def completion(self, job):

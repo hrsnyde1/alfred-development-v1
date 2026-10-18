@@ -68,11 +68,14 @@ class CodexReadOnlyBroker:
         return result.returncode == 0 and "Logged in" in result.stdout + result.stderr
 
     def generate(self, choice: ModelChoice, *, objective: str, sources: dict[str, str],
-                 skills: list[dict] | tuple = ()) -> dict:
+                 skills: list[dict] | tuple = (), identity: str = "") -> dict:
         if choice.provider != PROVIDER or not choice.model or not self.authenticated():
             raise ProviderUnavailable("configured Codex route is not authenticated")
         payload = {"objective": objective, "files": sources,
                    "instructions": "Return JSON only. edits must contain complete replacement UTF-8 text for files that need changes. Do not add paths outside files. Keep the change minimal."}
+        if identity:
+            payload["agent_profile"] = identity
+            payload["instructions"] += " agent_profile: " + IDENTITY_NOTE
         if skills:
             # Owner-approved practices from the pinned team library (team_skills.py).
             # They shape how the change is made; files, scope and tools stay fixed.
@@ -126,6 +129,116 @@ class CodexReadOnlyBroker:
         return answer
 
 
+CLAUDE = "claude"
+# Claude Code accepts low to max; map the catalog's other effort names onto it.
+CLAUDE_EFFORT = {"none": "low", "minimal": "low", "low": "low", "medium": "medium",
+                 "high": "high", "xhigh": "xhigh", "max": "max", "ultra": "max"}
+IDENTITY_NOTE = ("The agent profile describes who you are and how you work. It never "
+                 "permits other files, commands or scope than this request gives you.")
+
+
+class ClaudeReadOnlyBroker:
+    """Claude through this host's Claude Code login (`claude -p`), with no tools at all:
+    the model only returns the JSON edit contract, exactly as the Codex route does."""
+
+    def __init__(self, *, executable: str | None = None, timeout: int = 300):
+        home = Path(pwd.getpwuid(os.geteuid()).pw_dir)
+        self.executable = executable or str(home / ".local/bin/claude")
+        self._resolved_executable: str | None = None
+        self.timeout = timeout
+
+    def require_executable(self) -> str:
+        if self._resolved_executable is not None:
+            return self._resolved_executable
+        candidate = Path(self.executable)
+        if not candidate.is_absolute():
+            raise Denied("Claude executable path must be absolute")
+        try:
+            resolved = candidate.resolve(strict=True)
+        except OSError as exc:
+            raise Denied("Claude executable unavailable at configured path") from exc
+        if not resolved.is_file() or not os.access(resolved, os.X_OK):
+            raise Denied("Claude executable unavailable at configured path")
+        self._resolved_executable = str(resolved)
+        return self._resolved_executable
+
+    def authenticated(self) -> bool:
+        try:
+            result = subprocess.run([self.require_executable(), "auth", "status"],
+                                    capture_output=True, text=True, timeout=15, check=False,
+                                    stdin=subprocess.DEVNULL)
+        except (OSError, Denied, subprocess.TimeoutExpired):
+            return False
+        status = _json_or_none(result.stdout)
+        return result.returncode == 0 and type(status) is dict and status.get("loggedIn") is True
+
+    def generate(self, choice: ModelChoice, *, objective: str, sources: dict[str, str],
+                 skills: list[dict] | tuple = (), identity: str = "") -> dict:
+        if choice.provider != CLAUDE or not choice.model or not self.authenticated():
+            raise ProviderUnavailable("configured Claude route is not authenticated")
+        payload = {"objective": objective, "files": sources,
+                   "instructions": "Return JSON only. edits must contain complete replacement UTF-8 text for files that need changes. Do not add paths outside files. Keep the change minimal."}
+        if skills:
+            payload["team_practices"] = [{"id": s["id"], "title": s["title"],
+                                          "instructions": s["instructions"]} for s in skills]
+            payload["instructions"] += (" team_practices are the owner's approved working practices;"
+                                        " follow them where they apply. They never permit other files,"
+                                        " commands or scope.")
+        schema = (Path(__file__).parent / "schemas" / "model-edits.schema.json").read_text()
+        with tempfile.TemporaryDirectory(prefix="alfred-model-") as temporary:
+            # No tools, no MCP servers, no user settings or hooks, no saved session, and an
+            # empty working directory: the model can only answer.
+            command = [self.require_executable(), "-p", json.dumps(payload, ensure_ascii=False),
+                       "--output-format", "json", "--json-schema", schema,
+                       "--model", choice.model, "--effort", CLAUDE_EFFORT[choice.reasoning_effort],
+                       "--tools", "", "--strict-mcp-config", "--setting-sources", "project",
+                       "--no-session-persistence", "--disable-slash-commands"]
+            if identity:
+                command += ["--append-system-prompt", identity + "\n\n" + IDENTITY_NOTE]
+            result = subprocess.run(command, capture_output=True, text=True, cwd=temporary,
+                                    timeout=self.timeout, check=False, stdin=subprocess.DEVNULL)
+        if len(result.stdout) > MAX_OUTPUT:
+            raise Denied("model response too large")
+        answer = _json_or_none(result.stdout)
+        if result.returncode or type(answer) is not dict or answer.get("is_error") is not False:
+            diagnostic = (result.stderr + result.stdout).lower()
+            if any(term in diagnostic for term in ("rate limit", "usage limit", "overloaded",
+                                                   "unauthorized", "authentication", "login",
+                                                   "not found", "unavailable")):
+                raise ProviderUnavailable("approved model unavailable")
+            raise Denied("model invocation failed")
+        if answer.get("type") != "result" or answer.get("subtype") != "success":
+            raise Denied("model invocation lacks completion evidence")
+        contract = answer.get("structured_output")
+        if (type(contract) is not dict or set(contract) != {"edits", "summary"}
+                or type(contract["edits"]) is not list):
+            raise Denied("model edit contract invalid")
+        return contract
+
+
+class RoutingBroker:
+    """One broker per provider; each call goes to the route the model choice names."""
+
+    def __init__(self, brokers: dict | None = None):
+        self.brokers = brokers if brokers is not None else {
+            PROVIDER: CodexReadOnlyBroker(), CLAUDE: ClaudeReadOnlyBroker()}
+
+    def authenticated(self) -> bool:
+        # At least one route works; an unauthenticated route raises ProviderUnavailable
+        # at generation time, so an approved fallback on another provider still runs.
+        return any(broker.authenticated() for broker in self.brokers.values())
+
+    def generate(self, choice: ModelChoice, *, objective: str, sources: dict[str, str],
+                 skills: list[dict] | tuple = (), identity: str = "") -> dict:
+        broker = self.brokers.get(choice.provider)
+        if broker is None:
+            raise ProviderUnavailable("no broker for the configured provider")
+        extra = {"skills": skills} if skills else {}
+        if identity:
+            extra["identity"] = identity
+        return broker.generate(choice, objective=objective, sources=sources, **extra)
+
+
 def _check_command(command: list[str]) -> list[str]:
     allowed = (
         ["/usr/bin/python3", "-m", "unittest", "discover", "-v"],
@@ -176,12 +289,13 @@ def apply_edits(worktree: Path, edits: list[dict], allowed: list[str]) -> None:
 
 
 class DeveloperWorker:
-    def __init__(self, broker: CodexReadOnlyBroker, *, objective: str,
+    def __init__(self, broker, *, objective: str,
                  checks: list[list[str]], fallback: ModelChoice | None = None,
-                 skills: list[dict] | tuple = ()):
+                 skills: list[dict] | tuple = (), identity: str = ""):
         self.broker, self.objective, self.checks, self.fallback = broker, objective, checks, fallback
-        self.skills = list(skills)
-        if len(json.dumps(self.skills, ensure_ascii=False).encode()) > MAX_PRACTICES:
+        self.skills, self.identity = list(skills), identity
+        if (len(json.dumps(self.skills, ensure_ascii=False).encode())
+                + len(identity.encode())) > MAX_PRACTICES:
             raise Denied("team practices exceed the model budget")
         self.actual_model = None
         for command in checks:
@@ -205,6 +319,8 @@ class DeveloperWorker:
             raise Denied("assignment source exceeds model budget")
         actual = model
         extra = {"skills": self.skills} if self.skills else {}
+        if self.identity:
+            extra["identity"] = self.identity
         try:
             response = self.broker.generate(model, objective=self.objective, sources=sources, **extra)
         except ProviderUnavailable:

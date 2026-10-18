@@ -1,0 +1,5 @@
+e4365dec95162b4789a66cd530863011d8c9f0569027132abc39ce6b6c62097a  /opt/alfred-developer-v1/developer_v1/real_worker.py
+4cf1e7a61622677144c8f3f33a4a14adae05daed0e4c6c436132c990c4c04b62  /opt/alfred-developer-v1/developer_v1/pipeline.py
+d9731eae53ffc27b4d453d946d044f2b93bde04e53e47fd9ba3221745149c775  /opt/alfred-developer-v1/developer_v1/agent_profiles.py
+1194c14f4b3260dce2f2baef7e87c330c13135e2b1db28de82d9dd9d788ffd7e  /opt/alfred-developer-v1/developer_v1/agent_profiles.json
+701a3e3380bae95289d0cc0ca2076a10a0003a124577f30791cae20aeec8d2fe  /etc/systemd/system/alfred-development-evidence.service.d/60-claude-agents.conf

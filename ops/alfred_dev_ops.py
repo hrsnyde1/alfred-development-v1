@@ -4,7 +4,8 @@
 
 Only these operations exist: status, pause, resume, install <N>, rollback <N>,
 resend <task> (one fresh publication approval text for an expired one) and abandon
-<project/task> (stop one task for good, by the owner's decision). There is
+<project/task> (stop one task for good, by the owner's decision) and republish
+<project/task> (one more publish attempt after a definite Publisher error). There is
 no generic command, path or argument passthrough. `install` runs a fixed sequence on a
 pinned handoff release, executing only code from inside the hash-verified archive, never
 from the alfred-writable checkout. The owner confirms each install by typing the start of
@@ -201,6 +202,39 @@ def abandon(name: str, now: float) -> dict:
     return {"task": name, "state": "abandoned", "next": "later requests run on the next poll"}
 
 
+MAX_PUBLISH_RETRIES = 3
+
+
+def republish(name: str, now: float) -> dict:
+    """Authorize one more publish attempt after the Publisher reported a definite error."""
+    project, _, task = name.partition("/")
+    if not PROJECT.fullmatch(project) or not TASK.fullmatch(task):
+        raise Refused("name the task as project/task, for example demo-site/T-0003")
+    directory = JOBS / project / task
+    if not directory.is_dir() or directory.is_symlink():
+        raise Refused(f"{name} not found")
+    if (directory / "complete.json").exists():
+        raise Refused(f"{name} already completed")
+    n = 1
+    while (directory / f"publisher-retry-{n}.json").exists():
+        n += 1
+    latest = directory / ("publisher.result.json" if n == 1 else f"publisher-retry-{n - 1}.result.json")
+    if not latest.exists():
+        raise Refused(f"{name} has no recorded publisher result to retry"
+                      if n == 1 else f"a publish retry for {name} is already queued")
+    if json.loads(latest.read_bytes()).get("status") != "ERROR":
+        raise Refused(f"{name}'s last publish did not report a definite error")
+    if n > MAX_PUBLISH_RETRIES:
+        raise Refused(f"{name} already used {MAX_PUBLISH_RETRIES} publish retries")
+    record = {"schema": "alfred.publisher-retry/1", "project": project, "task_id": task,
+              "n": n, "authorized_by": os.environ.get("SUDO_USER"), "authorized_at": now}
+    fd = os.open(directory / f"publisher-retry-{n}.json",
+                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as stream:
+        stream.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    return {"task": name, "retry": n, "next": "the next poll publishes again"}
+
+
 def status() -> dict:
     handoffs = JOBS
     tasks = {}
@@ -224,6 +258,7 @@ def main() -> int:
         sub.add_parser(name).add_argument("handoff", type=int)
     sub.add_parser("resend").add_argument("task")
     sub.add_parser("abandon").add_argument("task", help="project/task, e.g. demo-site/T-0002")
+    sub.add_parser("republish").add_argument("task", help="project/task, e.g. demo-site/T-0003")
     args = parser.parse_args()
     if os.geteuid() != 0:
         print("Run with sudo.", file=sys.stderr)
@@ -246,6 +281,8 @@ def main() -> int:
             result = resend(args.task, dt.datetime.now(dt.timezone.utc).timestamp())
         elif args.operation == "abandon":
             result = abandon(args.task, dt.datetime.now(dt.timezone.utc).timestamp())
+        elif args.operation == "republish":
+            result = republish(args.task, dt.datetime.now(dt.timezone.utc).timestamp())
         else:
             result = rollback(args.handoff)
     except (Refused, subprocess.CalledProcessError, OSError, ValueError) as exc:

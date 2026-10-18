@@ -28,6 +28,7 @@ def write_once(path: Path, obj: dict):
 
 
 MAX_FIX_ROUNDS = 3
+MAX_PUBLISH_RETRIES = 3
 FINDING = 300
 
 
@@ -218,6 +219,19 @@ def advance(directory: Path, job: dict, io):
             return {"state": "awaiting_publication_approval"}
         job["authorization_path"] = authorization["path"]
         result = once(directory, "publisher", lambda: io.publish(job))
+        # The Publisher reported a definite error (for example its token could not see
+        # the repository). Only the owner, with `alfred-dev-ops republish`, authorizes
+        # one more attempt under the same approval; the Publisher re-checks GitHub
+        # for an existing branch or draft PR before it pushes.
+        n = 1
+        while (
+            result.get("status") == "ERROR"
+            and n <= MAX_PUBLISH_RETRIES
+            and io.publish_retry_authorized(job, n)
+        ):
+            job["publish_stage"] = f"publisher-retry-{n}"
+            result = once(directory, job["publish_stage"], lambda: io.publish(job))
+            n += 1
         if result.get("status") != "PUBLISHED_DRAFT":
             raise Held(
                 "Publisher success is unverified; publication investigation required"
