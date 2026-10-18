@@ -467,10 +467,11 @@ class World(host.Host):
                 **kwargs,
                 trusted_uid=os.geteuid(),
                 trusted_root=self.root,
+                # A PR the fixture merged (handoff.31) reads back as merged.
                 get_pr=lambda repo, number: {
-                    **self.github.pr_list[0],
                     "merged": False,
                     "merged_at": None,
+                    **self.github.pr_list[0],
                 },
                 sender_factory=lambda _: send,
                 paused_check=lambda: True,

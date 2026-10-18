@@ -67,12 +67,17 @@ def load_delegation_policy(path: Path | None, *, owner_uid: int) -> dict | None:
     development = policy.get("development_approval") if type(policy) is dict else None
     projects = development.get("projects") if type(development) is dict else None
     if (type(policy) is not dict
-            or set(policy) != {"schema", "development_approval", "publication_approval"}
+            or set(policy) - {"merge_approval"} != {"schema", "development_approval",
+                                                     "publication_approval"}
             or policy["schema"] != DELEGATION_SCHEMA
             # "owner": the owner answers a second text before every draft PR. "delegated"
             # (owner-authorized 2026-10-18): the owner's "yes" to the request preview also
-            # approves its draft PR, never a merge, for the same listed projects only.
+            # approves its draft PR for the same listed projects only.
             or policy["publication_approval"] not in ("owner", "delegated")
+            # Absent or "owner": the owner merges. "delegated" (owner-authorized
+            # 2026-10-18, handoff.31): after QA and the Reviewer pass, the pipeline
+            # squash-merges the draft PR itself; the owner can reply "undo" for 24 hours.
+            or policy.get("merge_approval", "owner") not in ("owner", "delegated")
             or set(development) != {"enabled", "projects"}
             or type(development["enabled"]) is not bool
             or type(projects) is not list or len(projects) != len(set(projects))
@@ -101,6 +106,12 @@ def publication_delegation_permits(policy: dict | None, project: str) -> bool:
     """A draft PR without a second owner text: only where development is delegated too."""
     return (delegation_permits(policy, project)
             and policy["publication_approval"] == "delegated")
+
+
+def merge_delegation_permits(policy: dict | None, project: str) -> bool:
+    """A squash merge without the owner: only where the draft PR is delegated too."""
+    return (publication_delegation_permits(policy, project)
+            and policy.get("merge_approval", "owner") == "delegated")
 
 
 class DevelopmentSendFailure(OSError):

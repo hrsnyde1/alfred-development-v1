@@ -6,7 +6,8 @@ recorded for each task and posts each step once, through the squads bridge
 
 - the Dev CTO announces the plan and the team, then each assignment;
 - each specialist reports what it changed (or why it could not);
-- QA reports its verdict; the CTO reports the review, fix rounds, the draft PR and stops.
+- QA reports its verdict; the CTO reports the review, fix rounds, the draft PR, the merge
+  into main (handoff.31) and an owner's "undo", and stops.
 
 It only reads pipeline evidence and never writes it, so it cannot change, hold or speed
 up a task. If an agent's bot is not connected yet, the CTO posts for it. A squad chat
@@ -194,6 +195,19 @@ def events(directory: Path, reports: Path, now: float) -> list[dict]:
                 add("published", at, f"🚀 {name} is on GitHub as a draft: {result['draft_pr_url']}")
             elif result.get("status") == "ERROR":
                 add(stage, at, f"⚠️ Publishing {name} failed: {_short(result.get('detail'))}")
+        elif stage == "merge":
+            # handoff.31: the pipeline's own squash merge, and the owner's "undo".
+            if result.get("status") == "MERGED" and result.get("commit_url"):
+                add("merged", at, f"🔀 {name} merged into main: {result['commit_url']}")
+            elif result.get("status") == "NOT_MERGED":
+                add(stage, at, f"⚠️ Couldn't merge {name} on our own "
+                               f"({_short(result.get('reason'))}); the draft PR waits for Hayden.")
+        elif stage == "undo":
+            if result.get("status") == "REVERTED" and result.get("commit_url"):
+                add("undone", at, f"↩️ {name} undone at Hayden's request: {result['commit_url']}")
+            elif result.get("status") == "NOT_REVERTED":
+                add(stage, at, f"↩️ Hayden asked to undo {name}, but it can't be undone on its "
+                               f"own ({_short(result.get('reason'))}). Nothing was changed.")
     if (at := mtime("fix-rounds-exhausted.result.json")) is not None:
         add("exhausted", at, f"🛑 {name} is on hold: the fix rounds ran out. Hayden decides next.")
     for failure in directory.glob("*.failure.json"):

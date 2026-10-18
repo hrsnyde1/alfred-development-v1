@@ -108,7 +108,11 @@ def bundle(config_path=CONFIG, *, trusted_uid=0, trusted_root=Path("/")):
     ):
         raise ValueError("invalid protected completion configuration")
     values = {}
-    for name in ("publication-result", "publication-plan", "owner-authorization"):
+    # handoff.31: the Publisher's merge record, pinned like the others when present.
+    names = ("publication-result", "publication-plan", "owner-authorization")
+    if "merge-result-sha256" in config:
+        names += ("merge-result",)
+    for name in names:
         value, digest = protected_json(
             config_path.parent / (name + ".json"),
             trusted_uid=trusted_uid,
@@ -266,6 +270,7 @@ def run(
         get_pr=get_pr,
         owner_login=config["owner_github_login"],
         owner_merge_attested=config["owner_merge_attested"],
+        merge=values.get("merge-result"),
     )
     if not send:
         return {"status": "PREVIEW", "text": notification.text}

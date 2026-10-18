@@ -1,0 +1,15 @@
+5e0b0a62de362736695e8c2f46bf04c1d61c2116902ef5d11f1442e7edca05bc  /etc/alfred-development/delegation.json
+898ab7f9de7bc9e797be1f3f2e6a344a416592ab50449bc9379e7448ddbea152  /opt/alfred-developer-v1/developer_v1/owner_grants.py
+daea095f40611b632e4736fdba92cea0f365afca2e47c927225a2e1847707dec  /opt/alfred-developer-v1/developer_v1/publication_approval.py
+421a62b04e68e0d687fba518b0dace08b11bcecc2c3919bb64f9148e46684e2a  /opt/alfred-developer-v1/developer_v1/undo_approval.py
+aaec900a75ac080ee55610e840737efb3d19423cd716cd52e9073c42b19da88a  /opt/alfred-developer-v1/developer_v1/trusted_intake_development.py
+aaec900a75ac080ee55610e840737efb3d19423cd716cd52e9073c42b19da88a  /usr/local/lib/alfred-v1.1/trusted_intake.py
+5aa8aaa3bb7c84371a6012c2d56525b200f3ae4db936ee9d3749e13b600fe2e1  /opt/alfred-independent-qa-v1/independent_qa/worker.py
+3b6bfc0bcb9f3bce3535db050185afa3c60aef494a5665000a6a896def6271c1  /opt/alfred-draft-pr-publisher-v1/worker.py
+1fee622af5b99c3bff689516bf9188979ce3f0dd2cf8be00224330378d7004f9  /usr/local/lib/alfred-completion-v1/completion_integration/completion.py
+bc35aabb4eb193ecc55daa5aa6501d49088356aec27eea2ef387a11575895208  /usr/local/lib/alfred-completion-v1/completion_integration/runtime.py
+fe3023677b36f9d7a81148ebcb1877f00bc5e72d23a208de131f64da2e7f65cf  /usr/local/lib/alfred-fresh-v1/fresh_v1/handoffs.py
+c18bafb0e49620b4ef54a047a0d6a672c594df91a176be1d02a9fbddfbe1fba6  /usr/local/lib/alfred-fresh-v1/fresh_v1/host.py
+bdcb9017d9bf56cacec72ccc52a68152bd864b7eee351167634870f15a425d52  /usr/local/lib/alfred-fresh-v1/fresh_v1/role.py
+57e155dc8ee141e58e55bac29e1b91cbbe677153092022b8d3ac2ef064e181b3  /usr/local/lib/alfred-fresh-v1/fresh_v1/diagnostics.py
+8c18094ab8090ebbb76d8b6074cc671debef06a23396af34fa66889a5416f1e8  /usr/local/lib/alfred-fresh-v1/fresh_v1/squads.py

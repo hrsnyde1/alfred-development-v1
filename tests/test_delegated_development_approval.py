@@ -15,10 +15,13 @@ from independent_qa import worker as qa_worker
 from tests import test_developer_execution_v1 as base
 
 
-def policy(projects=("dev-999",), enabled=True, publication="owner"):
-    return {"schema": "alfred.development-delegation-policy/1",
-            "development_approval": {"enabled": enabled, "projects": list(projects)},
-            "publication_approval": publication}
+def policy(projects=("dev-999",), enabled=True, publication="owner", merge=None):
+    value = {"schema": "alfred.development-delegation-policy/1",
+             "development_approval": {"enabled": enabled, "projects": list(projects)},
+             "publication_approval": publication}
+    if merge is not None:
+        value["merge_approval"] = merge  # handoff.31
+    return value
 
 
 class DelegationFixture(unittest.TestCase):
@@ -89,7 +92,8 @@ class DelegatedApprovalTest(DelegationFixture):
     def test_unknown_publication_modes_and_wildcards_are_refused(self):
         for value in (policy(publication="alfred"), policy(projects=("*",)),
                       policy(projects=("dev-999", "dev-999")),
-                      {**policy(), "deploy": True}):
+                      {**policy(), "deploy": True}, policy(merge="always"),
+                      policy(publication="delegated", merge=True)):
             with self.subTest(policy=value):
                 self.write_policy(value)
                 with self.assertRaises(Denied):
@@ -172,8 +176,8 @@ class DelegatedApprovalTest(DelegationFixture):
 class QADelegatedEvidenceTest(DelegationFixture):
     """Independent QA accepts delegated evidence only when it binds the exact request."""
 
-    def evidence(self, publication="owner"):
-        self.write_policy(policy(publication=publication))
+    def evidence(self, publication="owner", merge=None):
+        self.write_policy(policy(publication=publication, merge=merge))
         reference = self.delegate()["reference"]
         self.execute(reference)
         grant_raw = (self.grants / f"grant-{reference}.json").read_bytes()
@@ -193,6 +197,39 @@ class QADelegatedEvidenceTest(DelegationFixture):
         reference, grant, grant_sha, issuance, expected = self.evidence("delegated")
         self.assertTrue(qa_worker.delegated_decision(
             self.grants, reference, grant, grant_sha, issuance, expected))
+
+    def test_qa_accepts_delegated_evidence_when_merging_is_delegated_too(self):
+        # handoff.31: the same bug as T-0007 must not come back with merge_approval.
+        reference, grant, grant_sha, issuance, expected = self.evidence("delegated", "delegated")
+        self.assertTrue(qa_worker.delegated_decision(
+            self.grants, reference, grant, grant_sha, issuance, expected))
+
+    def test_qa_accepts_an_explicit_owner_merge_mode(self):
+        reference, grant, grant_sha, issuance, expected = self.evidence("delegated", "owner")
+        self.assertTrue(qa_worker.delegated_decision(
+            self.grants, reference, grant, grant_sha, issuance, expected))
+
+    def test_qa_rejects_an_unknown_merge_mode(self):
+        reference, grant, grant_sha, issuance, expected = self.evidence("delegated", "delegated")
+        path = self.grants / f"delegation-{reference}.json"
+        original = json.loads(path.read_bytes())
+
+        def rewritten(merge):
+            # Re-seal the record consistently, so only the merge mode differs.
+            record = json.loads(json.dumps(original))
+            record["policy"]["merge_approval"] = merge
+            record["policy_sha256"] = hashlib.sha256(json.dumps(
+                record["policy"], sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            path.chmod(0o600)
+            path.write_bytes(json.dumps(record).encode())
+            record_sha = hashlib.sha256(path.read_bytes()).hexdigest()
+            return qa_worker.delegated_decision(
+                self.grants, reference, {**grant, "delegation_sha256": record_sha}, grant_sha,
+                {**issuance, "delegation_sha256": record_sha,
+                 "policy_sha256": record["policy_sha256"]}, expected)
+
+        self.assertTrue(rewritten("owner"))
+        self.assertFalse(rewritten("always"))
 
     def test_qa_owner_reply_check_never_accepts_a_delegated_grant(self):
         reference, grant, grant_sha, issuance, expected = self.evidence()

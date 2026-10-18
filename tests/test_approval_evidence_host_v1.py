@@ -50,12 +50,14 @@ class ApprovalEvidenceHostDelta(unittest.TestCase):
         # agent_profiles.*: handoff.21 gives each agent its owner-reviewed identity.
         # team_snapshot.py, router.py, specialists.json, README.md and the example
         # models: owner-approved Alfred OS team snapshots and builder, qa, code_reviewer.
+        # undo_approval.py: handoff.31's owner "undo" reply to a merged change's text.
         self.assertEqual(different, {"team_snapshot.py", "router.py", "specialists.json",
                                     "README.md", "models.codex-verified.example.json",
                                     "pipeline.py", "owner_grants.py", "run_task.py", "publication_approval.py",
                                     "trusted_intake_development.py", "stage_approval.py", "release.sha256",
                                     "real_worker.py", "team_skills.py", "execution.py",
-                                    "agent_profiles.py", "agent_profiles.json"})
+                                    "agent_profiles.py", "agent_profiles.json",
+                                    "undo_approval.py"})
         self.assertNotEqual(HISTORICAL.joinpath("trusted_intake_development.py").read_bytes(),
                             PACKAGE.joinpath("trusted_intake_development.py").read_bytes())
 
