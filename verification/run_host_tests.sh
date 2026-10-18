@@ -144,6 +144,10 @@ run handoff24 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_confirm_d
   tests/test_publish_retry.py tests/test_development_handoff24_upgrade.py \
   --junitxml="$OUT/handoff24.xml"
 
+# handoff.27: the pipeline speaks in the squads' Telegram chats.
+run handoff27 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_dev_squads.py \
+  tests/test_development_handoff27_upgrade.py --junitxml="$OUT/handoff27.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"
