@@ -10,6 +10,8 @@ from development_handoff21 import install_patch as transaction
 from fresh_v1 import upgrade
 
 ROOT = Path(__file__).resolve().parents[1]
+# The commit handoff.21 was built on: its installed base.
+BASE_COMMIT = "abc35f0"
 
 
 def write(path, raw, mode=0o644):
@@ -19,7 +21,7 @@ def write(path, raw, mode=0o644):
 
 
 def committed(name):
-    return subprocess.run(["git", "-C", str(ROOT), "show", "HEAD:" + name],
+    return subprocess.run(["git", "-C", str(ROOT), "show", BASE_COMMIT + ":" + name],
                           capture_output=True, check=True).stdout
 
 
