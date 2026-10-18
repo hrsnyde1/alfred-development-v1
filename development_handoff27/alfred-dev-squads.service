@@ -1,0 +1,23 @@
+[Unit]
+Description=Alfred Development: the pipeline speaks in the squads' Telegram chats (read-only)
+After=alfred-os-squads.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 -I -B -c 'import sys; sys.path.insert(0, "/usr/local/lib/alfred-fresh-v1"); from fresh_v1.squads import main; main()'
+StateDirectory=alfred-dev-squads
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE
+RestrictAddressFamilies=AF_INET
+IPAddressDeny=any
+IPAddressAllow=localhost
+SystemCallArchitectures=native
+TimeoutStartSec=120
