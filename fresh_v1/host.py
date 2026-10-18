@@ -522,6 +522,9 @@ worker_main(sys.argv[1:])"""
     def development_grant(self, job, reference):
         path = Path(self.p["grant_root"]) / f"grant-{reference}.json"
         if not path.exists():
+            # The owner's passkey-signed "decline" in Alfred OS stops this task.
+            if (Path(self.p["grant_root"]) / f"development-passkey-decline-{reference}.json").exists():
+                raise Held("owner declined development in Alfred OS")
             return None
         grant = json.loads(read_owned(path, self.uids["alfred"]))
         if any(
@@ -953,6 +956,12 @@ worker_main(sys.argv[1:])"""
         The intake allows one at a time, so another task waits instead of sending."""
         grants = Path(self.p["grant_root"])
         now = time.time()
+        # An Alfred OS offer (owner_approval.py) is open until answered or expired.
+        for path in grants.glob("owner-offer-*.json"):
+            offer = json.loads(read_owned(path, self.uids["alfred"]))
+            if (offer.get("kind") == kind and now <= offer["expires_at"]
+                    and not (grants / f"owner-passkey-decided-{offer['offer']}.json").exists()):
+                return True
         if kind == "development":
             for path in grants.glob("pending-*.json"):
                 pending = json.loads(read_owned(path, self.uids["alfred"]))
@@ -972,12 +981,16 @@ worker_main(sys.argv[1:])"""
         grants = Path(self.p["grant_root"])
         if (grants / f"publication-decision-{reference}.json").exists():
             return False
-        receipt = json.loads(
-            read_owned(grants / f"publication-challenge-{reference}.json", self.uids["alfred"])
-        )
+        if (grants / f"publication-passkey-decline-{reference}.json").exists():
+            raise Held("owner declined the draft PR in Alfred OS")
+        name = (f"owner-offer-{reference}.json" if (grants / f"owner-offer-{reference}.json").exists()
+                else f"publication-challenge-{reference}.json")
+        receipt = json.loads(read_owned(grants / name, self.uids["alfred"]))
         return time.time() > receipt["expires_at"]
 
     def publication_authorization(self, job, reference):
+        if (Path(self.p["grant_root"]) / f"publication-passkey-decline-{reference}.json").exists():
+            raise Held("owner declined the draft PR in Alfred OS")
         if not (
             Path(self.p["grant_root"]) / f"publication-decision-{reference}.json"
         ).exists():

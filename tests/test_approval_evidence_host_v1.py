@@ -57,7 +57,11 @@ class ApprovalEvidenceHostDelta(unittest.TestCase):
                                     "trusted_intake_development.py", "stage_approval.py", "release.sha256",
                                     "real_worker.py", "team_skills.py", "execution.py",
                                     "agent_profiles.py", "agent_profiles.json",
-                                    "undo_approval.py"})
+                                    "undo_approval.py",
+                                    # Alfred OS passkey approvals.
+                                    "owner_passkey.py", "owner_approval.py",
+                                    "enroll_owner_passkey.py", "stage_publication.py",
+                                    "alfred-development-intake-owner-approval.conf"})
         self.assertNotEqual(HISTORICAL.joinpath("trusted_intake_development.py").read_bytes(),
                             PACKAGE.joinpath("trusted_intake_development.py").read_bytes())
 

@@ -89,6 +89,8 @@ def main() -> None:
     action.add_argument("--prepare", action="store_true")
     parser.add_argument("--space-id")
     parser.add_argument("--reference")
+    # Default: /etc/alfred-development/approval-channel.json (absent: iMessage).
+    parser.add_argument("--channel", choices=("alfred_os", "imessage"))
     args = parser.parse_args()
     if args.socket != SOCKET_PATH:
         parser.error("publication approval requires the reviewed Intake socket")
@@ -97,10 +99,11 @@ def main() -> None:
             parser.error("stage requires only --space-id")
         raw = _read_plan(PLAN_PATH)
         result = _exchange(args.socket, {"op": "stage_publication_approval",
-                      "plan_raw": raw.decode("utf-8"), "space_id": args.space_id})
-        print(json.dumps({key: result[key] for key in ("state", "challenge", "message_id")}))
+                      "plan_raw": raw.decode("utf-8"), "space_id": args.space_id,
+                      **({"channel": args.channel} if args.channel else {})})
+        print(json.dumps({key: result.get(key) for key in ("state", "challenge", "message_id")}))
     else:
-        if not args.reference or args.space_id:
+        if not args.reference or args.space_id or args.channel:
             parser.error("prepare requires only --reference")
         result = _exchange(args.socket, {"op": "prepare_publication_authorization",
                                         "reference": args.reference})

@@ -29,6 +29,16 @@ DELEGATED_DECISION = "alfred.publication-delegated-decision/1"
 MERGE_DELEGATED = "alfred.merge-delegated-decision/1"
 
 
+def _decided_plan(root: Path, decision_path: Path) -> str | None:
+    """The plan a publication decision approved: an iMessage or delegated receipt, or an
+    Alfred OS passkey offer (owner_approval.py)."""
+    reference = decision_path.stem.removeprefix("publication-decision-")
+    if (root / f"owner-offer-{reference}.json").exists():
+        from .owner_approval import offer_plan_sha
+        return offer_plan_sha(root, reference)
+    return _read(root, f"publication-challenge-{reference}.json").get("plan_sha256")
+
+
 def _phrase(reference: str, bound: dict | None = None) -> str:
     bound = BOUND if bound is None else bound
     return f"Approve GitHub Draft PR {bound['project']} {bound['task_id']} {reference}"
@@ -196,7 +206,9 @@ def _check_decision(receipt: dict, decision: dict, reference: str) -> None:
 class PublicationApprovalIssuer:
     def __init__(self, root: Path, *, owner_sender_id: str, preview_sender,
                  sidecar_uid: int, clock=time.time, admin_uid: int = 0, plan_verifier=None,
-                 delegation_policy: Path | None = None, policy_owner: int = 0):
+                 delegation_policy: Path | None = None, policy_owner: int = 0,
+                 channel_policy: Path | None = None, owner_passkey_pin: Path | None = None,
+                 alfred_os_uid: int | None = None):
         # The development issuer already validates this same private Intake store.
         from .owner_grants import _protected
         _protected(root)
@@ -209,6 +221,9 @@ class PublicationApprovalIssuer:
         # The owner's delegation policy (root-owned), read on every use, so turning it
         # off applies to the next draft PR. None: the owner answers each one.
         self.delegation_policy, self.policy_owner = delegation_policy, policy_owner
+        # Alfred OS passkey approvals (owner_approval.py). None: iMessage only, as before.
+        self.channel_policy, self.owner_passkey_pin = channel_policy, owner_passkey_pin
+        self.alfred_os_uid = alfred_os_uid
 
     def _policy(self) -> dict | None:
         return load_delegation_policy(self.delegation_policy, owner_uid=self.policy_owner)
@@ -217,8 +232,7 @@ class PublicationApprovalIssuer:
         """The owner's policy approves this exact draft PR, so no text is sent. The record
         says so plainly and never claims an owner reply."""
         for decided in self.root.glob("publication-decision-*.json"):
-            old_ref = decided.stem.removeprefix("publication-decision-")
-            if _read(self.root, f"publication-challenge-{old_ref}.json").get("plan_sha256") == plan_sha:
+            if _decided_plan(self.root, decided) == plan_sha:
                 raise Denied("publication decision already exists for this plan")
         reference = uuid.uuid4().hex
         now = self.clock()
@@ -267,8 +281,10 @@ class PublicationApprovalIssuer:
         return self._context(raw)
 
     def stage(self, plan_raw: bytes, *, space_id: str, peer_uid: int,
-              summary: object = None) -> dict:
-        """With a summary, the owner gets the plain-language 12-hour "yes" approval."""
+              summary: object = None, channel: str | None = None) -> dict:
+        """With a summary, the owner gets the plain-language 12-hour "yes" approval.
+        channel "alfred_os" records an offer for the owner's passkey instead of a text."""
+        from . import owner_approval
         if peer_uid != self.admin_uid or type(space_id) is not str or not space_id:
             raise Denied("publication staging requires administrator and DM")
         bound, plan_sha, notes = self._context(plan_raw)
@@ -277,7 +293,15 @@ class PublicationApprovalIssuer:
         if publication_delegation_permits(policy, bound["project"]):
             with self._lock:
                 return self._delegate(bound, plan_sha, policy)
+        alfred_os = owner_approval.resolve_channel(
+            channel, self.channel_policy, owner_uid=self.policy_owner) == "alfred_os"
         with self._lock:
+            if owner_approval.open_offers(self.root, "publication", self.clock()):
+                raise Denied("publication challenge already pending")
+            for declined in self.root.glob("publication-passkey-decline-*.json"):
+                if owner_approval.offer_plan_sha(self.root, declined.stem.removeprefix(
+                        "publication-passkey-decline-")) == plan_sha:
+                    raise Denied("the owner declined this publication plan")
             for path in self.root.glob("publication-pending-*.json"):
                 reference = path.stem.removeprefix("publication-pending-")
                 receipt = _read(self.root, f"publication-challenge-{reference}.json")
@@ -288,10 +312,23 @@ class PublicationApprovalIssuer:
                     "challenge_sha256": _digest(receipt), "expired_at": self.clock()})
                 path.unlink()
             for decided in self.root.glob("publication-decision-*.json"):
-                old_ref = decided.stem.removeprefix("publication-decision-")
-                previous = _read(self.root, f"publication-challenge-{old_ref}.json")
-                if previous.get("plan_sha256") == plan_sha:
+                if _decided_plan(self.root, decided) == plan_sha:
                     raise Denied("publication decision already exists for this plan")
+            if alfred_os:
+                from .owner_passkey import NotPinned, load_pin
+                try:
+                    load_pin(self.owner_passkey_pin, owner_uid=self.policy_owner)
+                except NotPinned as exc:
+                    raise Denied("Alfred OS approvals need the root-pinned owner passkey") from exc
+                if self.alfred_os_uid is None:
+                    raise Denied("Alfred OS approvals are not configured")
+                return owner_approval.write_offer(
+                    self.root, kind="publication", project=bound["project"],
+                    task_id=bound["task_id"],
+                    title=summary or f"Draft PR {bound['project']} {bound['task_id']}",
+                    owner_id=self.owner, space_id=space_id, now=self.clock(),
+                    body={"publication": {"plan_sha256": plan_sha, **bound},
+                          "summary": summary})
             reference = uuid.uuid4().hex
             message = (_challenge_text(reference, bound, plan_sha, notes) if summary is None
                        else _simple_text(summary, notes))
@@ -336,8 +373,7 @@ class PublicationApprovalIssuer:
                 record = _read(self.root, name)
             else:
                 # The draft PR itself must have been approved, by the owner or by delegation.
-                if not any(_read(self.root, f"publication-challenge-{p.stem.removeprefix('publication-decision-')}.json")
-                           .get("plan_sha256") == plan_sha
+                if not any(_decided_plan(self.root, p) == plan_sha
                            for p in self.root.glob("publication-decision-*.json")):
                     raise Denied("no publication decision for this plan")
                 policy = self._policy()
@@ -441,6 +477,8 @@ class PublicationApprovalIssuer:
         """Return a record for root installation only after evidence revalidation."""
         if peer_uid != self.admin_uid or type(reference) is not str or not REF.fullmatch(reference):
             raise Denied("publication preparation requires administrator and reference")
+        if (self.root / f"owner-offer-{reference}.json").exists():
+            return self._prepare_passkey(reference)
         receipt = _read(self.root, f"publication-challenge-{reference}.json")
         decision = _read(self.root, f"publication-decision-{reference}.json")
         issuance = _read(self.root, f"publication-issuance-{reference}.json")
@@ -475,6 +513,28 @@ class PublicationApprovalIssuer:
             raise Denied("publication challenge still pending")
         if (self.root / f"publication-expired-{reference}.json").exists():
             raise Denied("publication challenge expired")
+        for pattern in ("decision-*.json", "publication-decision-*.json"):
+            if sum(_read(self.root, path.name).get("owner_event_id") == decision["owner_event_id"]
+                   for path in self.root.glob(pattern)) != (1 if pattern.startswith("publication-") else 0):
+                raise Denied("owner event reused")
+        return {"schema": "alfred.github-draft-pr-authorization/1", "decision": "approved",
+                **bound, "publication_plan_sha256": plan_sha,
+                "owner_event_id": decision["owner_event_id"], "purpose": "one_github_draft_pr"}
+
+    def _prepare_passkey(self, reference: str) -> dict:
+        """An Alfred OS approval: the stored signature is re-verified against the root pin,
+        the sealed plan is re-read, and the decision must come from the Alfred OS peer."""
+        from .owner_approval import verify_publication_evidence
+        offer = _read(self.root, f"owner-offer-{reference}.json")
+        if type(offer.get("publication")) is not dict:
+            raise Denied("passkey publication offer invalid")
+        bound, plan_sha, _ = self._receipt_context(
+            {"project": offer.get("project"), "task_id": offer.get("task_id"),
+             "plan_sha256": offer["publication"].get("plan_sha256")})
+        decision = verify_publication_evidence(
+            self.root, reference, bound=bound, plan_sha=plan_sha,
+            pin_path=self.owner_passkey_pin, pin_owner=self.policy_owner,
+            alfred_os_uid=self.alfred_os_uid)
         for pattern in ("decision-*.json", "publication-decision-*.json"):
             if sum(_read(self.root, path.name).get("owner_event_id") == decision["owner_event_id"]
                    for path in self.root.glob(pattern)) != (1 if pattern.startswith("publication-") else 0):

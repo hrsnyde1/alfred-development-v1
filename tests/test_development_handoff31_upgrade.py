@@ -129,5 +129,8 @@ def test_installed_after_pins_are_the_release_files():
     lines = (ROOT / "development_handoff31/installed-after.sha256").read_text().splitlines()
     pins = dict(reversed(line.split("  ", 1)) for line in lines)
     assert set(pins) == set(transaction.DESTINATIONS)
+    # The released tree, not the working copy: later changes (for example the
+    # passkey approvals) move developer_v1 on without changing what handoff.31 installed.
+    release = ROOT / "dist/alfred-fresh-v1-1.0.1-development-handoff.31"
     for name, source in transaction.DESTINATIONS.items():
-        assert pins[name] == hashlib.sha256((ROOT / source).read_bytes()).hexdigest()
+        assert pins[name] == hashlib.sha256((release / source).read_bytes()).hexdigest()

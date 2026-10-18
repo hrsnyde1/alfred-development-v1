@@ -48,6 +48,19 @@ tree is installed or active on the host.
    the Developer report. A completed report produces `alfred.qa-input/1`; QA
    itself remains a separate future stage.
 
+## Owner approvals in Alfred OS with a passkey
+
+With the `alfred_os` channel (`--channel`, default from the root-owned
+`/etc/alfred-development/approval-channel.json`; absent means iMessage), staging records
+an offer and sends nothing. Alfred OS, running as its own user, lists and opens offers
+over `/run/alfred-development-intake/owner-approval.sock` (`owner_approval.py`). V1
+mints a 5-minute statement, the owner signs it with the passkey root pinned in
+`/etc/alfred-development/owner-passkey.json` (`enroll_owner_passkey`), and V1 verifies
+the WebAuthn assertion itself (`owner_passkey.py`, standard library ES256). Approve and
+decline are both signed and the action is inside the digest. A decline stops the offer
+and its task; an approval writes the usual grant or publication decision with source
+`alfred_os_owner_passkey`, and `verify()`/`prepare()` re-verify the stored signature.
+
 ## Owner-approved team snapshots (Alfred OS)
 
 `team_snapshot.py` reads `/var/lib/alfred-development-state/team/<agent>/`

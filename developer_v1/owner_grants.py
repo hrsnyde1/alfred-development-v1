@@ -43,6 +43,8 @@ def _round_name(reference: str, fix_round: int) -> str:
 
 OWNER_SOURCE = "photon_native_owner_reply"
 DELEGATED_SOURCE = "delegated_owner_policy"
+# The owner's passkey, verified by V1 itself (owner_approval.py); see that module.
+PASSKEY_SOURCE = "alfred_os_owner_passkey"
 
 
 def load_delegation_policy(path: Path | None, *, owner_uid: int) -> dict | None:
@@ -367,15 +369,22 @@ class _DelegatedDecision:
                 "source": "independent_owner_channel", "reference": reference}
 
 
+def _pin_path(path: Path | None, environment: str) -> Path | None:
+    # Like the delegation policy: staging never reads the host pin implicitly.
+    from .owner_passkey import PIN_PATH
+    return path if path is not None else (PIN_PATH if environment == "host" else None)
+
+
 class ProtectedDevelopmentAuthority:
     def __init__(self, root: Path, *, clock=time.time, environment: str = "host",
-                 delegation_policy: Path | None = None):
+                 delegation_policy: Path | None = None, owner_passkey_pin: Path | None = None):
         if environment not in {"host", "staging"}:
             raise Denied("invalid grant environment")
         self.root = root
         self.clock = clock
         self.environment = environment
         self.delegation_policy = _policy_path(delegation_policy, environment)
+        self.owner_passkey_pin = _pin_path(owner_passkey_pin, environment)
         self.activation_marker = Path("/opt/alfred-developer-v1/active")
 
     def verify(self, reference: str, expected: dict) -> dict:
@@ -395,7 +404,7 @@ class ProtectedDevelopmentAuthority:
             raise Denied("development grant unavailable") from exc
         if (grant.get("reference") != reference or grant.get("issuer") != "trusted_owner_authority"
                 or grant.get("state") != "approved"
-                or grant.get("source") not in {OWNER_SOURCE, DELEGATED_SOURCE}
+                or grant.get("source") not in {OWNER_SOURCE, DELEGATED_SOURCE, PASSKEY_SOURCE}
                 or grant.get("environment") != self.environment
                 or set(grant.get("permissions", [])) != PERMISSIONS
                 or any(grant.get(k) != v for k, v in expected.items())):
@@ -407,6 +416,11 @@ class ProtectedDevelopmentAuthority:
         if grant["source"] == DELEGATED_SOURCE:
             _verify_delegation(self.root, reference, grant, expected, load_delegation_policy(
                 self.delegation_policy, owner_uid=_policy_owner(self.environment)))
+        elif grant["source"] == PASSKEY_SOURCE:
+            # Re-verifies the stored signature against the root pin on every verify().
+            from .owner_approval import verify_development_evidence
+            verify_development_evidence(self.root, reference, grant, expected,
+                                        self.owner_passkey_pin, _policy_owner(self.environment))
         else:
             _verify_evidence(self.root, reference, grant, expected)
         return grant
@@ -474,7 +488,8 @@ class DevelopmentGrantIssuer:
 
     def __init__(self, root: Path, *, owner_sender_id: str, preview_sender,
                  sidecar_uid: int, clock=time.time, admin_uid: int = 0,
-                 environment: str = "host", delegation_policy: Path | None = None):
+                 environment: str = "host", delegation_policy: Path | None = None,
+                 channel_policy: Path | None = None, owner_passkey_pin: Path | None = None):
         _protected(root)
         self.root, self.owner, self.send = root, owner_sender_id, preview_sender
         if environment not in {"host", "staging"}:
@@ -484,6 +499,10 @@ class DevelopmentGrantIssuer:
         self.clock, self.admin_uid, self.sidecar_uid = clock, admin_uid, sidecar_uid
         self.environment = environment
         self.delegation_policy = _policy_path(delegation_policy, environment)
+        from .owner_approval import CHANNEL_POLICY
+        self.channel_policy = (channel_policy if channel_policy is not None
+                               else (CHANNEL_POLICY if environment == "host" else None))
+        self.owner_passkey_pin = _pin_path(owner_passkey_pin, environment)
         self._lock = threading.Lock()
 
     def _delegate(self, request: dict, space_id: str, policy: dict) -> dict:
@@ -559,7 +578,10 @@ class DevelopmentGrantIssuer:
             }))
         return result
 
-    def stage(self, request: dict, *, space_id: str, peer_uid: int, plan_raw: bytes | None = None) -> dict:
+    def stage(self, request: dict, *, space_id: str, peer_uid: int, plan_raw: bytes | None = None,
+              channel: str | None = None, title: str | None = None) -> dict:
+        """channel: "imessage" sends today's challenge text; "alfred_os" records an offer
+        for the owner's passkey in Alfred OS and sends nothing. None: the root policy."""
         if peer_uid != self.admin_uid or not isinstance(space_id, str) or not space_id:
             raise Denied("development approval staging requires protected administrator")
         if (request.get("schema") != "alfred.development-approval-request/1"
@@ -569,9 +591,12 @@ class DevelopmentGrantIssuer:
         # This method is called only after the Gateway adapter and canonical
         # binding recompute the request; raw client-supplied requests are refused
         # by the intake extension.
+        from . import owner_approval
         with self._lock:
             if ((self.root / _send_slot(request)).exists()
-                    or (self.root / _delegation_slot(request)).exists()):
+                    or (self.root / _delegation_slot(request)).exists()
+                    or (self.root / owner_approval._offer_slot(request["project"],
+                                                              request["task_id"])).exists()):
                 raise Denied("development challenge already attempted; reconciliation required")
             for path in self.root.glob("pending-*.json"):
                 prior = _read(self.root, path.name)
@@ -589,7 +614,8 @@ class DevelopmentGrantIssuer:
                     path.unlink()
             if (any(self.root.glob("pending-*.json"))
                     or any(self.clock() <= p["created_at"] + MAX_AGE
-                           for _, p in self._ack_pending())):
+                           for _, p in self._ack_pending())
+                    or owner_approval.open_offers(self.root, "development", self.clock())):
                 raise Denied("another development approval is pending")
             for path in self.root.glob("grant-*.json"):
                 old = _read(self.root, path.name)
@@ -602,6 +628,9 @@ class DevelopmentGrantIssuer:
                                             owner_uid=_policy_owner(self.environment))
             if delegation_permits(policy, request["project"]):
                 return self._delegate(request, space_id, policy)
+            if owner_approval.resolve_channel(channel, self.channel_policy,
+                                              owner_uid=_policy_owner(self.environment)) == "alfred_os":
+                return self._offer(request, space_id, plan_raw, title)
             challenge = uuid.uuid4().hex
             phrase = _phrase(request)
             message = _challenge_text(request, plan_raw)
@@ -652,6 +681,24 @@ class DevelopmentGrantIssuer:
             })
             return {"state": "awaiting_native_owner_reply", "challenge": challenge,
                     "message_id": message_id}
+
+    def _offer(self, request: dict, space_id: str, plan_raw: bytes | None,
+               title: str | None) -> dict:
+        """An Alfred OS offer: nothing is sent and no reply is awaited."""
+        from . import owner_approval
+        from .owner_passkey import NotPinned, load_pin
+        try:
+            load_pin(self.owner_passkey_pin, owner_uid=_policy_owner(self.environment))
+        except NotPinned as exc:
+            raise Denied("Alfred OS approvals need the root-pinned owner passkey") from exc
+        if plan_raw is not None:
+            _challenge_text(request, plan_raw)  # the same plan checks as the iMessage text
+        return owner_approval.write_offer(
+            self.root, kind="development", project=request["project"],
+            task_id=request["task_id"], title=title, owner_id=self.owner,
+            space_id=space_id, now=self.clock(),
+            body={"request": request, **({"plan_raw": plan_raw.decode()}
+                                         if plan_raw is not None else {})})
 
     def observe(self, event: object, *, peer_uid: int) -> dict:
         if peer_uid != self.sidecar_uid or type(event) is not dict:
