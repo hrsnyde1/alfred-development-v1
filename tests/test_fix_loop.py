@@ -18,7 +18,7 @@ from tests.test_fresh_v1 import world  # noqa: F401 (pytest fixture)
 class RecordingBroker(fresh.MultiplyBroker):
     objectives = []
 
-    def generate(self, choice, *, objective, sources):
+    def generate(self, choice, *, objective, sources, identity=""):
         RecordingBroker.objectives.append(objective)
         return super().generate(choice, objective=objective, sources=sources)
 
@@ -26,7 +26,7 @@ class RecordingBroker(fresh.MultiplyBroker):
 class CalculatorOnlyBroker(fresh.MultiplyBroker):
     """Changes one of its two assigned files, as most real requests do."""
 
-    def generate(self, choice, *, objective, sources):
+    def generate(self, choice, *, objective, sources, identity=""):
         result = super().generate(choice, objective=objective, sources=sources)
         result["edits"] = [e for e in result["edits"] if e["path"] == "calculator.py"]
         return result

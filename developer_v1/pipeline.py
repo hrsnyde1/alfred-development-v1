@@ -10,11 +10,13 @@ from pathlib import Path
 from .execution import AssignmentStore, _git, build_assignments, invoke, qa_manifest
 from .gateway_adapter import GatewayInputs, read_gateway_inputs
 from .owner_grants import ProtectedDevelopmentAuthority, _digest
-from . import team_skills
-from .real_worker import CodexReadOnlyBroker, DeveloperWorker, create_worktree
+from . import agent_profiles, team_skills
+from .real_worker import (CodexReadOnlyBroker, DeveloperWorker, RoutingBroker,
+                          create_worktree)
 from .router import (CAPABILITY_BY_ROLE, Denied, ModelChoice, route, select_model,
                      task_complexity)
 
+PROVIDERS = {"codex", "claude"}
 CHECK = ["/usr/bin/python3", "-m", "unittest", "discover", "-v"]
 
 
@@ -32,7 +34,7 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
                      grant_root: Path, items: list[dict], models: dict,
                      state_root: Path, checks: list[list[str]] | None = None,
                      total_cost_limit: float, overrides: dict | None = None,
-                     broker: CodexReadOnlyBroker | None = None,
+                     broker=None,
                      grant_environment: str = "host", baseline_revision: str | None = None,
                      delegation_policy: Path | None = None,
                      team_skills_root: Path = team_skills.ROOT,
@@ -52,19 +54,21 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
                      scope=scope, authorization_reference=grant_reference,
                      authority=authority, spec_decoder=inputs.spec_decoder)
     assignments = build_assignments(dispatch, items)
-    broker = broker or CodexReadOnlyBroker()
+    broker = broker or RoutingBroker()
     if isinstance(broker, CodexReadOnlyBroker):
         broker.require_executable()
     if not broker.authenticated():
         raise Denied("configured model broker is not authenticated")
-    if set(models.get("providers", {})) != {"codex"}:
-        raise Denied("only the authenticated Codex broker is installed")
-    available = {("codex", name) for name in models["providers"]["codex"]}
+    providers = models.get("providers", {})
+    if not providers or not set(providers) <= PROVIDERS:
+        raise Denied("only the Codex and Claude brokers are installed")
+    available = {(provider, name) for provider, catalog in providers.items() for name in catalog}
     spec, plan = inputs.spec_decoder(inputs.spec_raw), json.loads(inputs.plan_raw)
     complexity = task_complexity(spec, plan, dispatch["specialists"])
     # Verified before the grant is claimed, so a missing or altered snapshot
     # leaves the owner's grant unused.
     skills = team_skills.for_plan(plan, team_skills_root, owner=team_skills_owner)
+    identities = {s: agent_profiles.identity(s) for s in dispatch["specialists"]}
     overrides = overrides or {}
     if set(overrides) - set(dispatch["specialists"]):
         raise Denied("model override outside assigned specialists")
@@ -75,7 +79,7 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
                              required_capabilities=CAPABILITY_BY_ROLE[specialist],
                              max_cost=remaining, complexity=complexity,
                              override=overrides.get(specialist))
-        remaining -= models["providers"]["codex"][first.model]["max_task_cost"]
+        remaining -= providers[first.provider][first.model]["max_task_cost"]
         fallback = None
         if overrides.get(specialist) is None and not first.fallback_used:
             try:
@@ -99,7 +103,7 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
         result = _execute_claimed(inputs, dispatch, assignments, choices,
                                   worktree_root, state_root, project, task_id,
                                   broker, checks, authority, baseline_revision, skills,
-                                  fix_round)
+                                  fix_round, identities)
     except BaseException as exc:
         authority.finish(grant_reference, status="failed" if isinstance(exc, Exception) else "uncertain",
                          fix_round=fix_round)
@@ -110,7 +114,7 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
 
 def _execute_claimed(inputs, dispatch, assignments, choices, worktree_root,
                      state_root, project, task_id, broker, checks, authority, baseline_revision,
-                     skills=(), fix_round=0):
+                     skills=(), fix_round=0, identities=None):
     state = AssignmentStore(state_root / project / task_id)
     # A single final branch carries every completed developer commit to QA.
     final = create_worktree(inputs.repository, worktree_root, project, task_id,
@@ -129,7 +133,8 @@ def _execute_claimed(inputs, dispatch, assignments, choices, worktree_root,
         worktree = create_worktree(inputs.repository, worktree_root, project, task_id,
                                    item["id"], _git(final, "rev-parse", "HEAD"))
         worker = DeveloperWorker(broker, objective=item["objective"],
-                                 checks=checks or [CHECK], fallback=fallback, skills=skills)
+                                 checks=checks or [CHECK], fallback=fallback, skills=skills,
+                                 identity=(identities or {}).get(item["specialist"], ""))
         report = invoke(dispatch, item, worktree=worktree, model=first, worker=worker,
                         store=state, trusted_authority=authority, approved_fallback=fallback)
         reports.append(report)

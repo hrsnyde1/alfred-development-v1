@@ -1,0 +1,7 @@
+{
+  "/opt/alfred-developer-v1/developer_v1/real_worker.py": "2363384faaaa9c14d0c148e0d0d879f39a2d372e76b87be90a3f1c86dcc33840",
+  "/opt/alfred-developer-v1/developer_v1/pipeline.py": "7932e0a44a465996d692fc431f5ed2645028b0440a3eb5b22f385bd581ec8ec6",
+  "/opt/alfred-developer-v1/developer_v1/agent_profiles.py": null,
+  "/opt/alfred-developer-v1/developer_v1/agent_profiles.json": null,
+  "/etc/systemd/system/alfred-development-evidence.service.d/60-claude-agents.conf": null
+}

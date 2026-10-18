@@ -30,10 +30,18 @@ import glob, json, os, pwd, sys, tempfile
 from pathlib import Path
 sys.path.insert(0, "/usr/local/lib/alfred-fresh-v1")
 from fresh_v1 import host
-REPO = Path("/home/alfred/alfred-development-lab/milestone2/task-a/live-acceptance/repo")
 finals = sorted(glob.glob("/var/lib/alfred-development-worktrees/fresh-*/*-final"),
                 key=os.path.getmtime)
 failures = []
+# The newest final worktree belongs to one registered project; clone it against that
+# project's repository, exactly as the host does for its Reviewer and Publisher.
+policy = json.loads(Path("/etc/alfred-fresh-v1/policy.json").read_bytes())
+REPO = None
+for project in (host.projects(policy) if hasattr(host, "projects") else []):
+    if finals and Path(finals[-1]).name.startswith(project + "-T-"):
+        REPO = Path(host.project_view(policy, project)["repository"])
+if REPO is None:
+    REPO = Path("/home/alfred/alfred-development-lab/milestone2/task-a/live-acceptance/repo")
 if not hasattr(host, "clone_snapshot"):
     failures.append("installed host lacks clone_snapshot (handoff.7 not installed)")
 elif not finals:
