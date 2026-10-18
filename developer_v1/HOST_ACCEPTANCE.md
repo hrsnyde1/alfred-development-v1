@@ -456,3 +456,269 @@ echo '93fbb6b7f29cec18ff9c172808a5ce4a257264000793ec0b639560b05e6b47d8  /opt/alf
 sudo env -C "$DEV_ROOT" sha256sum -c developer_v1/release.sha256
 sudo test ! -e "$DEV_ROOT/active"
 ```
+
+## Team-snapshot update for the already installed host (PR #25, separate authorization)
+
+This section installs PR #25: owner-approved Alfred OS team snapshots
+(`team_snapshot.py`) and the `builder`, `qa` and `code_reviewer` specialists.
+**Nothing in this section has been run against the host.** Do not run
+`host_install` or `alfred-dev-ops install` for it. Do not dispatch a task, send a
+message or create `/var/lib/alfred-development-state/team` during the procedure.
+
+What changes: the ten package files #25 changed, the new `team_snapshot.py`, and
+three files in `/usr/local/lib/alfred-fresh-v1`. Intake, Photon, Hermes, the
+Gateway, both CTO sources, `models.json`, unit files, drop-ins and grants are
+untouched, so no Intake change is needed. No service restarts: the developer and
+planning roles are started on demand by the Evidence service, so the next task
+loads the new code.
+
+| Host file (relative to `/`) | Before | After |
+| --- | --- | --- |
+| `opt/alfred-developer-v1/developer_v1/README.md` | `9a70e941…` | `47454493…` |
+| `…/developer_v1/execution.py` | `b14d0162…` | `06301833…` |
+| `…/developer_v1/models.codex-verified.example.json` | `250eb960…` | `09a689ca…` |
+| `…/developer_v1/pipeline.py` | `4cf1e7a6…` | `52548e3b…` |
+| `…/developer_v1/real_worker.py` | `3fba2a76…` (handoff.26) | `18050836…` (handoff.26 + #25) |
+| `…/developer_v1/router.py` | `69c70a83…` | `aeb37188…` |
+| `…/developer_v1/run_task.py` | `167f6035…` | `4ba8a842…` |
+| `…/developer_v1/specialists.json` | `13b73ea6…` | `430caee1…` |
+| `…/developer_v1/schemas/developer-report.schema.json` | `11f559f5…` | `21f6fa90…` |
+| `…/developer_v1/team_snapshot.py` | absent | `db5e8d84…` |
+| `…/developer_v1/release.sha256` | `e7262bbb…` | `dabaeae4…` |
+| `usr/local/lib/alfred-fresh-v1/fresh_v1/host.py` | `7c67a323…` (handoff.24) | `f73a6ec5…` |
+| `usr/local/lib/alfred-fresh-v1/fresh_v1/role.py` | `71d74bc7…` | `00a2349b…` |
+| `usr/local/lib/alfred-fresh-v1/v1_cto/plan.schema.json` | `922a477d…` | `c8d49247…` |
+
+Full digests are in `live-acceptance/team-snapshot-update/`. Only its
+`make_pins.py` regenerates them; it reads the host and writes beside itself.
+
+- `installed-before.sha256` (`459ca653d7e71407ffaa7e6689ffe879d4ce71f4fa7977c809e245da77fb6e56`):
+  the installed bytes today, paths relative to `/`.
+- `staged.sha256` (`cbe94a43e28de9cb4ee20d47a45d3553ba4f5912e14b0e1a4316124b8dd768eb`):
+  the checkout files to copy, plus the checker.
+- `installed-after.sha256` (`6546d00dcb2d556c0c0aad031665215bc42f3344f9cc2c646c9088423fae6f1f`):
+  the same staged bytes at their host paths.
+
+The **currently installed** release manifest is
+`e7262bbb772dd1417fdf616e4a6b69c12ad371b5b7408811d5fb0bf259ccffd9`. It does
+**not** verify its own tree today. Later handoffs replaced eight package files
+without updating it, so `sha256sum -c` on it reports eight mismatches; this is why
+the before-state is pinned file by file. The **new** release manifest is
+`dabaeae44a69116ab4c9048e93554e53567decc17ff6d60e5b2fc320c3dcbc77`. After the
+replacement it verifies every file in `/opt/alfred-developer-v1/developer_v1`
+(checked against the live tree when this section was written). The installed
+`real_worker.py` carries handoff.26's Claude-token fix. The staged one is exactly
+that file plus #25's `team_profile` lines, so the fix is kept. The post-install
+checker is `live-acceptance/verify_team_snapshot_host_update.py`
+(`51e428767effc752d60c62b75ac5c2c6c10e94790241cc395a23bd9b5be95b5b`).
+
+### Read-only prechecks
+
+Run these from the checkout at the merged commit. Every command must succeed;
+stop on any failure.
+
+```bash
+set -euo pipefail
+cd /home/alfred/alfred-development-v1
+PINS=live-acceptance/team-snapshot-update
+echo "cbe94a43e28de9cb4ee20d47a45d3553ba4f5912e14b0e1a4316124b8dd768eb  $PINS/staged.sha256" | sha256sum -c -
+echo "459ca653d7e71407ffaa7e6689ffe879d4ce71f4fa7977c809e245da77fb6e56  $PINS/installed-before.sha256" | sha256sum -c -
+echo "6546d00dcb2d556c0c0aad031665215bc42f3344f9cc2c646c9088423fae6f1f  $PINS/installed-after.sha256" | sha256sum -c -
+sha256sum -c "$PINS/staged.sha256"
+echo 'dabaeae44a69116ab4c9048e93554e53567decc17ff6d60e5b2fc320c3dcbc77  developer_v1/release.sha256' | sha256sum -c -
+sha256sum -c developer_v1/release.sha256
+echo 'e7262bbb772dd1417fdf616e4a6b69c12ad371b5b7408811d5fb0bf259ccffd9  /opt/alfred-developer-v1/developer_v1/release.sha256' | sudo sha256sum -c -
+sudo env -C / sha256sum -c "$PWD/$PINS/installed-before.sha256"
+sudo test ! -e /opt/alfred-developer-v1/developer_v1/team_snapshot.py
+sudo test ! -e /var/lib/alfred-development-state/team
+sudo test -f /opt/alfred-developer-v1/active
+sudo test ! -e /opt/alfred-developer-v1/team-snapshot-backup-v1
+sudo test ! -e /opt/alfred-developer-v1/team-snapshot-update-v1
+systemctl is-active alfred-development-intake.service alfred-photon.service alfred-hermes.service
+systemctl show -p ActiveState -p Result alfred-development-gateway.service alfred-development-gateway.timer
+sha256sum /home/alfred/Git/alfred/.dev/bin/cto.py /usr/local/lib/alfred-fresh-v1/v1_cto/cto.py
+```
+
+Then pause new work and wait until nothing is running. Run `sudo alfred-dev-ops
+pause`; `sudo alfred-dev-ops status` must then show `"pause": true` and no task
+with a stage in progress. Keep the pause until the end of the procedure.
+
+### Backup and staging (after explicit operator authorization)
+
+The backup uses a fixed path so an earlier backup is never overwritten: stop if it
+already exists. It holds the whole installed `developer_v1` tree and the three
+`alfred-fresh-v1` files at their host paths, and it is verified before anything is
+disabled. No credentials, grants or state are copied. The update directory is
+readable by `alfred` only so the checker can run without root. The backup stays
+mode `0700`.
+
+```bash
+set -euo pipefail
+cd /home/alfred/alfred-development-v1
+PINS=$PWD/live-acceptance/team-snapshot-update
+DEV_ROOT=/opt/alfred-developer-v1
+FRESH_ROOT=/usr/local/lib/alfred-fresh-v1
+BACKUP=$DEV_ROOT/team-snapshot-backup-v1
+UPDATE=$DEV_ROOT/team-snapshot-update-v1
+sudo test -f /home/alfred/Alfred/gateway/PAUSE
+sudo test ! -e "$BACKUP"
+sudo test ! -e "$UPDATE"
+sudo install -d -o root -g root -m 0700 "$BACKUP" "$BACKUP/root"
+sudo install -d -o root -g root -m 0755 "$UPDATE"
+sudo install -d -o root -g root -m 0700 "$BACKUP/root/opt/alfred-developer-v1" \
+  "$BACKUP/root/usr/local/lib/alfred-fresh-v1/fresh_v1" "$BACKUP/root/usr/local/lib/alfred-fresh-v1/v1_cto"
+sudo cp -a "$DEV_ROOT/developer_v1" "$BACKUP/root/opt/alfred-developer-v1/developer_v1"
+for file in fresh_v1/host.py fresh_v1/role.py v1_cto/plan.schema.json; do
+  sudo cp -a "$FRESH_ROOT/$file" "$BACKUP/root/usr/local/lib/alfred-fresh-v1/$file"
+done
+sudo install -o root -g root -m 0644 "$PINS/installed-before.sha256" "$BACKUP/installed-before.sha256"
+sudo env -C "$BACKUP/root" sha256sum -c "$BACKUP/installed-before.sha256"
+sudo test ! -e "$BACKUP/root/opt/alfred-developer-v1/developer_v1/team_snapshot.py"
+while read -r sha relative; do
+  sudo install -D -o root -g root -m 0644 "$relative" "$UPDATE/$relative"
+  sudo cmp "$relative" "$UPDATE/$relative"
+done < "$PINS/staged.sha256"
+sudo install -o root -g root -m 0644 "$PINS/staged.sha256" "$UPDATE/staged.sha256"
+sudo install -o root -g root -m 0644 "$PINS/installed-after.sha256" "$UPDATE/installed-after.sha256"
+echo "cbe94a43e28de9cb4ee20d47a45d3553ba4f5912e14b0e1a4316124b8dd768eb  $UPDATE/staged.sha256" | sudo sha256sum -c -
+echo "6546d00dcb2d556c0c0aad031665215bc42f3344f9cc2c646c9088423fae6f1f  $UPDATE/installed-after.sha256" | sudo sha256sum -c -
+sudo env -C "$UPDATE" sha256sum -c staged.sha256
+echo "51e428767effc752d60c62b75ac5c2c6c10e94790241cc395a23bd9b5be95b5b  $UPDATE/live-acceptance/verify_team_snapshot_host_update.py" | sudo sha256sum -c -
+```
+
+### Replacement and checker
+
+This is the **only host replacement**. It first moves the activation marker into
+the verified backup, before touching any code. It then replaces each file
+atomically from the root-owned update directory. `team_snapshot.py` goes in last,
+after every file it depends on. Finally it verifies the new release manifest and
+the after pins. If any command fails the block stops; then use the rollback block
+below.
+
+The checker runs as `alfred` with the marker absent. It checks that:
+
+- the installed release manifest verifies and no unlisted file is present;
+- the imported `developer_v1` and `fresh_v1` are the installed copies;
+- with no team directory, every specialist's prompt is byte-identical to its
+  built-in profile (both the real path, which must not exist, and a missing
+  private root);
+- a synthetic snapshot in a private `/tmp` directory loads and composes with the
+  safety rules last, and a `cto` snapshot loads;
+- a tampered or symlinked snapshot file falls back to built-in;
+- `builder`, `qa` and `code_reviewer` are in `specialists.json` and can be
+  staffed, while existing routing is unchanged;
+- the installed plan schema accepts `team_profile`;
+- both CTO digests, the Gateway unit state and Intake/Photon/Hermes match the
+  pre-replacement baseline.
+
+It calls no model, worker, Photon or Gateway. Restore the marker only if the
+checker prints `PASS` and exits zero.
+
+```bash
+set -euo pipefail
+DEV_ROOT=/opt/alfred-developer-v1
+FRESH_ROOT=/usr/local/lib/alfred-fresh-v1
+BACKUP=$DEV_ROOT/team-snapshot-backup-v1
+UPDATE=$DEV_ROOT/team-snapshot-update-v1
+CTO_BEFORE=$(sha256sum /home/alfred/Git/alfred/.dev/bin/cto.py | cut -d ' ' -f1)
+INSTALLED_CTO_BEFORE=$(sha256sum "$FRESH_ROOT/v1_cto/cto.py" | cut -d ' ' -f1)
+GATEWAY_BEFORE=$(systemctl show -p ActiveState -p Result alfred-development-gateway.service alfred-development-gateway.timer | sha256sum | cut -d ' ' -f1)
+sudo test -f /home/alfred/Alfred/gateway/PAUSE
+sudo env -C "$BACKUP/root" sha256sum -c "$BACKUP/installed-before.sha256"
+sudo env -C "$UPDATE" sha256sum -c staged.sha256
+echo "51e428767effc752d60c62b75ac5c2c6c10e94790241cc395a23bd9b5be95b5b  $UPDATE/live-acceptance/verify_team_snapshot_host_update.py" | sudo sha256sum -c -
+sudo mv -T "$DEV_ROOT/active" "$BACKUP/active"
+for file in README.md execution.py models.codex-verified.example.json pipeline.py real_worker.py \
+            router.py run_task.py specialists.json schemas/developer-report.schema.json release.sha256; do
+  sudo install -o root -g root -m 0644 "$UPDATE/developer_v1/$file" "$DEV_ROOT/developer_v1/$file.next"
+  sudo mv -T "$DEV_ROOT/developer_v1/$file.next" "$DEV_ROOT/developer_v1/$file"
+done
+for file in fresh_v1/host.py fresh_v1/role.py v1_cto/plan.schema.json; do
+  sudo install -o root -g root -m 0644 "$UPDATE/$file" "$FRESH_ROOT/$file.next"
+  sudo mv -T "$FRESH_ROOT/$file.next" "$FRESH_ROOT/$file"
+done
+sudo install -o root -g root -m 0644 "$UPDATE/developer_v1/team_snapshot.py" "$DEV_ROOT/developer_v1/team_snapshot.py.next"
+sudo mv -T "$DEV_ROOT/developer_v1/team_snapshot.py.next" "$DEV_ROOT/developer_v1/team_snapshot.py"
+echo 'dabaeae44a69116ab4c9048e93554e53567decc17ff6d60e5b2fc320c3dcbc77  /opt/alfred-developer-v1/developer_v1/release.sha256' | sudo sha256sum -c -
+sudo env -C "$DEV_ROOT" sha256sum -c developer_v1/release.sha256
+sudo env -C / sha256sum -c "$UPDATE/installed-after.sha256"
+sudo test ! -e "$DEV_ROOT/active"
+sudo -u alfred env -i PATH=/usr/bin:/bin PYTHONPATH=/opt/alfred-developer-v1:/usr/local/lib/alfred-fresh-v1:/home/alfred/Git/alfred/src \
+  /home/alfred/Git/alfred/.venv/bin/python -B "$UPDATE/live-acceptance/verify_team_snapshot_host_update.py" \
+  --cto-sha256 "$CTO_BEFORE" --installed-cto-sha256 "$INSTALLED_CTO_BEFORE" --gateway-sha256 "$GATEWAY_BEFORE"
+sudo mv -T "$BACKUP/active" "$DEV_ROOT/active"
+sudo test -f "$DEV_ROOT/active"
+```
+
+**PASS:** every hash check succeeds and the checker prints `PASS` and exits zero.
+Intake, Photon and Hermes stay active; the Gateway state and both CTO digests are
+unchanged; the marker is restored only afterward. Then run `sudo alfred-dev-ops
+resume` when the owner wants new work to run.
+
+**FAIL:** any command fails, the checker prints `FAIL` or exits nonzero, any
+digest differs, or the marker reappears before the checker passes. Leave execution
+disabled and paused, and run the rollback.
+
+### Rollback
+
+Use this after a partial or completed replacement, or whenever the outcome is
+unclear. It restores the fourteen files from the verified backup and moves the
+installed `team_snapshot.py` into the backup. It **leaves execution disabled**:
+the marker ends up in `$BACKUP/disabled-after-rollback` and PAUSE stays set, until
+the owner separately decides to re-enable it. Grants, handoff jobs, state and the
+backup are kept. No service restarts.
+
+```bash
+set -euo pipefail
+DEV_ROOT=/opt/alfred-developer-v1
+FRESH_ROOT=/usr/local/lib/alfred-fresh-v1
+BACKUP=$DEV_ROOT/team-snapshot-backup-v1
+sudo env -C "$BACKUP/root" sha256sum -c "$BACKUP/installed-before.sha256"
+if sudo test -e "$DEV_ROOT/active"; then sudo mv -T "$DEV_ROOT/active" "$BACKUP/disabled-after-rollback"; fi
+if sudo test -e "$BACKUP/active"; then sudo mv -T "$BACKUP/active" "$BACKUP/disabled-after-rollback"; fi
+for file in README.md execution.py models.codex-verified.example.json pipeline.py real_worker.py \
+            router.py run_task.py specialists.json schemas/developer-report.schema.json release.sha256; do
+  sudo install -o root -g root -m 0644 "$BACKUP/root/opt/alfred-developer-v1/developer_v1/$file" "$DEV_ROOT/developer_v1/$file.next"
+  sudo mv -T "$DEV_ROOT/developer_v1/$file.next" "$DEV_ROOT/developer_v1/$file"
+done
+for file in fresh_v1/host.py fresh_v1/role.py v1_cto/plan.schema.json; do
+  sudo install -o root -g root -m 0644 "$BACKUP/root/usr/local/lib/alfred-fresh-v1/$file" "$FRESH_ROOT/$file.next"
+  sudo mv -T "$FRESH_ROOT/$file.next" "$FRESH_ROOT/$file"
+done
+if sudo test -e "$DEV_ROOT/developer_v1/team_snapshot.py"; then
+  sudo mv -T "$DEV_ROOT/developer_v1/team_snapshot.py" "$BACKUP/team_snapshot.py.removed"
+fi
+sudo find "$DEV_ROOT/developer_v1" "$FRESH_ROOT/fresh_v1" "$FRESH_ROOT/v1_cto" -maxdepth 2 -name '*.next' -type f -delete
+sudo env -C / sha256sum -c "$BACKUP/installed-before.sha256"
+sudo test ! -e "$DEV_ROOT/developer_v1/team_snapshot.py"
+echo 'e7262bbb772dd1417fdf616e4a6b69c12ad371b5b7408811d5fb0bf259ccffd9  /opt/alfred-developer-v1/developer_v1/release.sha256' | sudo sha256sum -c -
+test "$(systemctl is-active alfred-development-intake.service)" = active
+test "$(systemctl is-active alfred-photon.service)" = active
+test "$(systemctl is-active alfred-hermes.service)" = active
+sudo test ! -e "$DEV_ROOT/active"
+sudo test -f /home/alfred/Alfred/gateway/PAUSE
+```
+
+If the backup itself fails its check, stop. Do not restore from it; leave the
+marker out and PAUSE set, and ask for a separate recovery review.
+
+### Before first use
+
+- **Models.** `/var/lib/alfred-development-state/models.json` has no slots for
+  `builder`, `qa` or `code_reviewer`. Until it does, a task routed to one of them
+  fails closed ("missing specialist model slot") before the owner's grant is
+  claimed. The alfred-hq applier (`bridge/alfred_os_team_apply.py`) writes the
+  slots on its first apply, copying `tools` and `fallback` from `full_stack`
+  (builder), `backend` (qa) and `security` (code_reviewer). Do not hand-edit them
+  as part of this update.
+- **Policy.** A project can use a new specialist only after its policy
+  `specialists` list names it (`fresh_v1/host.py` checks the list). Each of the
+  three staffs a task on its own; only `frontend` and `backend` split a task
+  between them.
+- **Snapshots.** Until the applier writes
+  `/var/lib/alfred-development-state/team/<id>/`, every agent runs on its built-in
+  profile exactly as before, and each Developer report records
+  `"team_profile": "builtin"`. The Evidence sandbox already mounts
+  `/var/lib/alfred-development-state` read-write, so the role identity can read
+  snapshots there. The applier must make them readable by that identity and must
+  not use symlinks.
