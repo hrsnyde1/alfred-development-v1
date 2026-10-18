@@ -78,6 +78,17 @@ def _short(text, limit: int = 160) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def _names(items) -> list[str]:
+    """File or blocker entries as text: reports list files as {path, sha256}."""
+    out = []
+    for item in items or []:
+        if isinstance(item, dict):
+            item = item.get("path") or item.get("detail") or item.get("reason")
+        if item:
+            out.append(str(item))
+    return out
+
+
 def _squads(specialists) -> list[str]:
     out = []
     for s in specialists or []:
@@ -141,11 +152,11 @@ def events(directory: Path, reports: Path, now: float) -> list[dict]:
         model = report.get("model_used") or {}
         via = f" ({model.get('provider')}/{model.get('model')})" if model.get("model") else ""
         if report.get("status") == "completed":
-            files = ", ".join(report.get("files_modified") or []) or "no files"
+            files = ", ".join(_names(report.get("files_modified"))) or "no files"
             text = (f"✅ Done with {name}{via}: {_short(report.get('work_completed'), 300)}\n"
                     f"Changed: {files}.")
         else:
-            text = f"⚠️ I couldn't finish {name}: {_short('; '.join(report.get('blockers') or []))}"
+            text = f"⚠️ I couldn't finish {name}: {_short('; '.join(_names(report.get('blockers'))))}"
         add(f"{report_path.stem}-{int(report_path.stat().st_mtime)}", report_path.stat().st_mtime,
             text, agent=agent, only=squad)
     for result_path in sorted(directory.glob("*.result.json"), key=lambda p: p.stat().st_mtime):
@@ -265,7 +276,13 @@ def run(jobs: Path = JOBS, reports: Path = REPORTS, state_path: Path = STATE,
     for directory in sorted(jobs.glob("*/T-*")):
         if not directory.is_dir() or directory.is_symlink():
             continue
-        for event in events(directory, reports, now):
+        try:
+            found = events(directory, reports, now)
+        except Exception as exc:  # one malformed record never stops the other tasks
+            print(json.dumps({"skipped": directory.name, "error": type(exc).__name__}),
+                  file=sys.stderr, flush=True)
+            continue
+        for event in found:
             if event["key"] in state["posted"] or now - event["at"] > MAX_AGE:
                 continue
             if per_squad.get(event["squad"], 0) >= PER_RUN:
