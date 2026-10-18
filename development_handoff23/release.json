@@ -1,0 +1,11 @@
+{
+  "archive_sha256": "213fd398fed8c9e381933b508b156666665b7d2d68256da101e784473c9a21eb",
+  "installed_after": "development_handoff23/installed-after.sha256",
+  "installer": "development_handoff23/install_patch.py",
+  "installer_sha256": "bd85ff7a0be61de1f98fa3a7099ccead0d2dd43689b3c8596f542b7c9fc5bc1a",
+  "manifest_sha256": "d9238598a1be4139e775d5ac1a24a4f403c68ec72866780f4aef2ada63782c3f",
+  "name": "alfred-fresh-v1-1.0.1-development-handoff.23",
+  "preflight": "verification/role_sandbox_preflight.py",
+  "restart": [],
+  "schema": "alfred.development-release/1"
+}

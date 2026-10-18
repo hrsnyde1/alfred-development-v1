@@ -11,6 +11,7 @@ import os
 import pwd
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 from pathlib import Path
@@ -137,15 +138,55 @@ IDENTITY_NOTE = ("The agent profile describes who you are and how you work. It n
                  "permits other files, commands or scope than this request gives you.")
 
 
+# The development agents' own long-lived Claude token (`claude setup-token`), saved by the
+# owner with `alfred-dev-ops claude-token`: root-owned, readable by the alfred group only.
+CLAUDE_TOKEN = Path("/etc/alfred-development/claude-agents.token")
+# Claude Code keeps its config, locks and caches under HOME. The agents get a private one
+# inside the sandbox's writable state, never the owner's own Claude Code login.
+CLAUDE_HOME = Path("/var/lib/alfred-development-state/claude-agents")
+TOKEN = re.compile(r"[A-Za-z0-9_-]{20,400}")
+UNAVAILABLE = ("rate limit", "usage limit", "overloaded", "unauthorized", "authenticat",
+               "login", "oauth", "token", "401", "403", "not found", "unavailable")
+
+
+def _claude_token(path: Path) -> str | None:
+    """The agents' token, only from a root-owned file no one else can read or change."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != 0
+                or info.st_mode & 0o027 or info.st_size > 1024):
+            return None
+        token = os.read(fd, 1025).decode("ascii", "replace").strip()
+    finally:
+        os.close(fd)
+    return token if TOKEN.fullmatch(token) else None
+
+
+def _private_home(path: Path) -> Path:
+    try:
+        path.mkdir(mode=0o700)
+    except FileExistsError:
+        pass
+    info = os.lstat(path)
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+        raise ProviderUnavailable("Claude agent home is not private")
+    return path
+
+
 class ClaudeReadOnlyBroker:
-    """Claude through this host's Claude Code login (`claude -p`), with no tools at all:
+    """Claude through the agents' own long-lived token (`claude -p`), with no tools at all:
     the model only returns the JSON edit contract, exactly as the Codex route does."""
 
-    def __init__(self, *, executable: str | None = None, timeout: int = 300):
-        home = Path(pwd.getpwuid(os.geteuid()).pw_dir)
-        self.executable = executable or str(home / ".local/bin/claude")
+    def __init__(self, *, executable: str | None = None, timeout: int = 300,
+                 token_file: Path = CLAUDE_TOKEN, home: Path = CLAUDE_HOME):
+        owner_home = Path(pwd.getpwuid(os.geteuid()).pw_dir)
+        self.executable = executable or str(owner_home / ".local/bin/claude")
         self._resolved_executable: str | None = None
-        self.timeout = timeout
+        self.timeout, self.token_file, self.home = timeout, token_file, home
 
     def require_executable(self) -> str:
         if self._resolved_executable is not None:
@@ -163,19 +204,27 @@ class ClaudeReadOnlyBroker:
         return self._resolved_executable
 
     def authenticated(self) -> bool:
+        # The token is checked by Claude on use; an expired one fails as unavailable,
+        # and the approved Codex fallback runs.
         try:
-            result = subprocess.run([self.require_executable(), "auth", "status"],
-                                    capture_output=True, text=True, timeout=15, check=False,
-                                    stdin=subprocess.DEVNULL)
-        except (OSError, Denied, subprocess.TimeoutExpired):
+            self.require_executable()
+        except Denied:
             return False
-        status = _json_or_none(result.stdout)
-        return result.returncode == 0 and type(status) is dict and status.get("loggedIn") is True
+        return _claude_token(self.token_file) is not None
+
+    def _environment(self) -> dict:
+        token = _claude_token(self.token_file)
+        if token is None:
+            raise ProviderUnavailable("configured Claude route is not authenticated")
+        return {"HOME": str(_private_home(self.home)), "PATH": "/usr/bin:/bin",
+                "CLAUDE_CODE_OAUTH_TOKEN": token, "DISABLE_AUTOUPDATER": "1",
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
 
     def generate(self, choice: ModelChoice, *, objective: str, sources: dict[str, str],
                  skills: list[dict] | tuple = (), identity: str = "") -> dict:
         if choice.provider != CLAUDE or not choice.model or not self.authenticated():
             raise ProviderUnavailable("configured Claude route is not authenticated")
+        environment = self._environment()
         payload = {"objective": objective, "files": sources,
                    "instructions": "Return JSON only. edits must contain complete replacement UTF-8 text for files that need changes. Do not add paths outside files. Keep the change minimal."}
         if skills:
@@ -196,15 +245,17 @@ class ClaudeReadOnlyBroker:
             if identity:
                 command += ["--append-system-prompt", identity + "\n\n" + IDENTITY_NOTE]
             result = subprocess.run(command, capture_output=True, text=True, cwd=temporary,
-                                    timeout=self.timeout, check=False, stdin=subprocess.DEVNULL)
+                                    timeout=self.timeout, check=False, stdin=subprocess.DEVNULL,
+                                    env=environment)
         if len(result.stdout) > MAX_OUTPUT:
             raise Denied("model response too large")
         answer = _json_or_none(result.stdout)
         if result.returncode or type(answer) is not dict or answer.get("is_error") is not False:
             diagnostic = (result.stderr + result.stdout).lower()
-            if any(term in diagnostic for term in ("rate limit", "usage limit", "overloaded",
-                                                   "unauthorized", "authentication", "login",
-                                                   "not found", "unavailable")):
+            # An API-side failure (login, limits, outage) is the provider being unavailable:
+            # the approved fallback model runs instead.
+            if (type(answer) is dict and answer.get("terminal_reason") == "api_error") or any(
+                    term in diagnostic for term in UNAVAILABLE):
                 raise ProviderUnavailable("approved model unavailable")
             raise Denied("model invocation failed")
         if answer.get("type") != "result" or answer.get("subtype") != "success":

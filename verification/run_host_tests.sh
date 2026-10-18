@@ -129,6 +129,11 @@ run handoff21 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_claude_ag
 run handoff22 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_publish_retry.py \
   tests/test_development_handoff22_upgrade.py --junitxml="$OUT/handoff22.xml"
 
+# handoff.23: the agents use their own Claude token; login errors fall back to Codex.
+run handoff23 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_claude_agents.py \
+  tests/test_development_handoff23_upgrade.py tests/test_alfred_dev_ops.py \
+  --junitxml="$OUT/handoff23.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"
