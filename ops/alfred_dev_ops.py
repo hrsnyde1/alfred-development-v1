@@ -2,8 +2,9 @@
 """Restricted root operations for Alfred Development (Option C). Installed root-owned at
 /usr/local/sbin/alfred-dev-ops and run by the owner with sudo.
 
-Only these operations exist: status, pause, resume, install <N>, rollback <N> and
-resend <task> (one fresh publication approval text for an expired one). There is
+Only these operations exist: status, pause, resume, install <N>, rollback <N>,
+resend <task> (one fresh publication approval text for an expired one) and abandon
+<project/task> (stop one task for good, by the owner's decision). There is
 no generic command, path or argument passthrough. `install` runs a fixed sequence on a
 pinned handoff release, executing only code from inside the hash-verified archive, never
 from the alfred-writable checkout. The owner confirms each install by typing the start of
@@ -140,9 +141,11 @@ GRANTS = Path("/var/lib/alfred-development-grants")
 
 def resend(task: str, now: float) -> dict:
     """Authorize one fresh publication approval text for an expired, unanswered one."""
-    if not TASK.fullmatch(task):
-        raise Refused("task must look like T-0009")
-    directories = sorted(JOBS.glob(f"*/{task}"))
+    project, _, number = task.rpartition("/")
+    if not TASK.fullmatch(number) or (project and not PROJECT.fullmatch(project)):
+        raise Refused("task must look like T-0009 or demo-site/T-0009")
+    task = number
+    directories = sorted(JOBS.glob(f"{project or '*'}/{task}"))
     if len(directories) != 1:
         raise Refused(f"{task} not found")
     directory = directories[0]
@@ -172,15 +175,41 @@ def resend(task: str, now: float) -> dict:
     return {"task": task, "resend": n, "next": "a fresh approval text within about 2 minutes"}
 
 
+PROJECT = re.compile(r"[a-z][a-z0-9-]{1,31}\Z")
+
+
+def abandon(name: str, now: float) -> dict:
+    """Stop one task for good, by the owner's decision: add a record the poll treats as
+    a definite outcome. Nothing existing is changed, removed or retried."""
+    project, _, task = name.partition("/")
+    if not PROJECT.fullmatch(project) or not TASK.fullmatch(task):
+        raise Refused("name the task as project/task, for example demo-site/T-0002")
+    directory = JOBS / project / task
+    if not directory.is_dir() or directory.is_symlink():
+        raise Refused(f"{name} not found")
+    if (directory / "complete.json").exists():
+        raise Refused(f"{name} already completed")
+    if any(directory.glob("*.failure.json")):
+        raise Refused(f"{name} is already stopped")
+    record = {"schema": "alfred.owner-abandoned/1", "stage": "owner-abandoned",
+              "project": project, "task_id": task,
+              "authorized_by": os.environ.get("SUDO_USER"), "abandoned_at": now}
+    fd = os.open(directory / "owner-abandoned.failure.json",
+                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as stream:
+        stream.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    return {"task": name, "state": "abandoned", "next": "later requests run on the next poll"}
+
+
 def status() -> dict:
-    handoffs = Path("/var/lib/alfred-v1-handoffs")
+    handoffs = JOBS
     tasks = {}
     for directory in sorted(handoffs.glob("*/T-*")):
         stages = sorted(p.name.removesuffix(".result.json")
                         for p in directory.glob("*.result.json"))
         failed = sorted(p.name.removesuffix(".failure.json")
                         for p in directory.glob("*.failure.json"))
-        tasks[directory.name] = {"completed_stages": stages, "failed": failed,
+        tasks[f"{directory.parent.name}/{directory.name}"] = {"completed_stages": stages, "failed": failed,
                                  "complete": (directory / "complete.json").exists()}
     return {"pause": PAUSE.is_file(), "tasks": tasks}
 
@@ -194,6 +223,7 @@ def main() -> int:
     for name in ("install", "rollback"):
         sub.add_parser(name).add_argument("handoff", type=int)
     sub.add_parser("resend").add_argument("task")
+    sub.add_parser("abandon").add_argument("task", help="project/task, e.g. demo-site/T-0002")
     args = parser.parse_args()
     if os.geteuid() != 0:
         print("Run with sudo.", file=sys.stderr)
@@ -214,6 +244,8 @@ def main() -> int:
             result = install(args.handoff, answer.strip())
         elif args.operation == "resend":
             result = resend(args.task, dt.datetime.now(dt.timezone.utc).timestamp())
+        elif args.operation == "abandon":
+            result = abandon(args.task, dt.datetime.now(dt.timezone.utc).timestamp())
         else:
             result = rollback(args.handoff)
     except (Refused, subprocess.CalledProcessError, OSError, ValueError) as exc:

@@ -110,6 +110,11 @@ run handoff17 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_fix_loop.
 run handoff18 "$PYTHON" -B -m pytest -q -p no:cacheprovider \
   tests/test_development_handoff18_upgrade.py --junitxml="$OUT/handoff18.xml"
 
+# handoff.19: plain requests pass QA's plan check; QA verdicts are recorded; abandon.
+run handoff19 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_plain_requests_reach_qa.py \
+  tests/test_development_handoff19_upgrade.py tests/test_alfred_dev_ops.py \
+  --junitxml="$OUT/handoff19.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"

@@ -12,6 +12,7 @@ from developer_v1 import team_skills
 from developer_v1.router import select_specialists
 from fresh_v1.diagnostics import WorkerFailure, failure, planning_output
 from fresh_v1.handoffs import write_once
+from fresh_v1.host import work_items
 from fresh_v1.protected import identity, protected_json
 
 # Read-only view of the gateway directory inside the Evidence sandbox (drop-in
@@ -141,11 +142,23 @@ def prepare_plan(job, policy, *, remote_main=None, fetch=True):
         plan = cto._central_cto(spec, repo, evidence, hashlib.sha256(raw).hexdigest())
         plan["baseline_revision"] = remote_main
         present = [p for p in policy["allowed_scope"] if p in evidence["files"]]
-        # Files the request names, else every allowed file the repository has (a
-        # plain-language request such as "add dark mode" names none).
-        # Sorted, exactly as the development approval binds it.
-        scope = sorted([p for p in present if p in plan["scope"]] or present)
         specialists = select_specialists(spec, plan)
+        # Files the request names. A plain-language request ("add dark mode") names
+        # none: then the files the CTO itself expects to change, when they can staff
+        # every specialist, else every allowed file. Sorted, as the approval binds it.
+        named = [p for p in present if p in plan["scope"]]
+        scope = sorted(named)
+        if not named:
+            expected = [p for p in present if p in plan.get("expected_components_files", [])]
+            try:
+                work_items(expected, specialists, "")
+                scope = sorted(expected)
+            except ValueError:
+                scope = sorted(present)
+            # Independent QA checks every approved file against the plan's scope, so
+            # the plan names the files it approves.
+            if scope:
+                plan["scope"] += "\nApproved files: " + ", ".join(scope)
         if (
             not scope
             or not set(specialists) <= set(policy["specialists"])

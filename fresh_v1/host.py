@@ -758,7 +758,11 @@ worker_main(sys.argv[1:])"""
         )
         self.directory(root / f"qa-output{fix_suffix(job)}", "alfredqa")
         result = self.worker(job, "qa", "alfredqa", job.get("round", 0))
-        if result.get("qa_model") is None:
+        # A PASS needs the model's independent analysis. A FAIL or BLOCKED found
+        # before any model ran (for example an evidence check) is still QA's
+        # verdict: record it, so the fix loop or a verdict hold follows, rather
+        # than leaving the stage unrecorded and every later request blocked.
+        if result.get("decision") == "PASS" and result.get("qa_model") is None:
             raise Held("independent QA model evidence missing")
         return result
 
