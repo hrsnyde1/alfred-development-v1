@@ -115,6 +115,10 @@ run handoff19 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_plain_req
   tests/test_development_handoff19_upgrade.py tests/test_alfred_dev_ops.py \
   --junitxml="$OUT/handoff19.xml"
 
+# handoff.20: the owner can retry a publish that reported a definite error.
+run handoff20 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_publish_retry.py \
+  tests/test_development_handoff20_upgrade.py --junitxml="$OUT/handoff20.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"
