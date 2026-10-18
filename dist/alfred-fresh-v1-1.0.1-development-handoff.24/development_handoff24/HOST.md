@@ -16,7 +16,12 @@ is and record the confirmation separately. This release makes that a restricted 
 operation the poll accepts.
 
 ## What changes
-Two files; nothing restarts.
+Two files; nothing restarts. Install it after handoff.23 and handoff.26. It pins
+handoff.23's `runtime.py` and handoff.26's `alfred-dev-ops`, `real_worker.py` and
+`60-claude-agents.conf`, and refuses before changing anything if they are not in place.
+The shipped `development_handoff24/host.py` is the installed host.py plus this fix only.
+Main's unreleased team-snapshot work (PR #25) stays out. The shipped `alfred-dev-ops`
+is handoff.26's, with `confirm-delivered` added; `claude-token` is kept.
 
 - `/usr/local/sbin/alfred-dev-ops` gains `confirm-delivered project/task`. The owner types
   `RECEIVED` to confirm. It refuses unless all of these hold:

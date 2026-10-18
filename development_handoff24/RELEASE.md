@@ -4,25 +4,27 @@ The owner can confirm a completion text they received although its delivery reco
 stayed `uncertain` (see [HOST.md](HOST.md)). Built by
 `development_handoff24/build_release.py`; `--reproduce
 dist/alfred-fresh-v1-1.0.1-development-handoff.24` rebuilds it byte for byte. It installs
-two files, `fresh_v1/host.py` and `ops/alfred_dev_ops.py`.
+two files: `development_handoff24/host.py` (the installed host.py plus this fix, without
+main's unreleased team-snapshot changes) and `ops/alfred_dev_ops.py` (handoff.26's, plus
+`confirm-delivered`).
+
+**Install order: 23, then 26, then 24.** This release pins handoff.23's `runtime.py` and
+handoff.26's `alfred-dev-ops`, `real_worker.py` and `60-claude-agents.conf`. Until both
+are installed, the installer refuses before changing anything.
 
 | Artifact | SHA-256 |
 | --- | --- |
-| `dist/alfred-fresh-v1-1.0.1-development-handoff.24.tar.gz` | `3dd2791bb7fdb13941f6abfc12616a655bda679ed5bf181a6e015a52d17cec50` |
-| Release `MANIFEST.sha256` (11 payload files) | `4ad921f0bd2099a8517ebf939a4dcdd2b852dbe49d7559ead138c8d17463ea62` |
-| Release `development_handoff24/install_patch.py` | `50853a125c54d9ef23c44a5b3f733a129720e54fe59e78dc59749636711f27d0` |
+| `dist/alfred-fresh-v1-1.0.1-development-handoff.24.tar.gz` | `f6321172711c23d798a73b639b692a76fd09cd3fb879375f4f9b36b33fb0fd03` |
+| Release `MANIFEST.sha256` (11 payload files) | `e6d8557518119677c595de907c0f2a0994c0075738103d196aa9d9e17386bea3` |
+| Release `development_handoff24/install_patch.py` | `81a335cca92e3fd9936acb5af4479d9b63bd1c5f720643313f59d94ae16793a5` |
 | Installed `host.py` after | `7c67a3234fa11d85950c1d5a6747845e327f469723870a594b44cf065909bf87` |
-| Installed `alfred-dev-ops` after | `0bdcd427a858a1921db2444ace1c6a77b23cdd3b203b3c72e0d6fe45870f976d` |
+| Installed `alfred-dev-ops` after | `9514cbdbc71be70585b097bdae0454c86eed786583e5c6a495adaa672f0076a4` |
 
-Staging evidence: Gate 1 passes, including `handoff24`. The live host (handoff.22
-installed) was read on 2026-10-18. 34 of the 36 pins matched it; the root-only
-`policy.json` pin is unchanged. The one other mismatch is `completion_integration/runtime.py`:
-it is still at its pre-handoff.23 bytes. This release requires handoff.23's runtime.py, so
-**install handoff.23 first**. Until then the installer refuses before changing anything.
+Staging evidence: Gate 1 passes, including `handoff24`. The live host was read on 2026-10-18 with handoffs 23 and 26 installed: all 35 readable pins matched it, and the root-only `policy.json` pin is unchanged.
 
 ## Deployment
 
-After `sudo alfred-dev-ops install 23` (see `development_handoff23/RELEASE.md`):
+After `install 23` and `install 26` (see their RELEASE.md files):
 
 ```bash
 sudo alfred-dev-ops pause
@@ -32,7 +34,7 @@ sudo alfred-dev-ops pause
 sudo alfred-dev-ops install 24
 ```
 
-Type `3dd2791bb7fd`. Expect one `OK` line for each of the two files and
+Type `f6321172711c`. Expect one `OK` line for each of the two files and
 `"pause": "still set"`.
 
 ```bash

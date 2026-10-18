@@ -21,7 +21,7 @@ PAYLOAD = (
     "development_handoff24/installed-after.sha256",
     "development_handoff24/installed-sha256.json",
     "development_handoff24/staging-tests.xml",
-    "fresh_v1/host.py",
+    "development_handoff24/host.py",
     "ops/alfred_dev_ops.py",
     "tests/test_confirm_delivered.py",
     "tests/test_development_handoff24_upgrade.py",

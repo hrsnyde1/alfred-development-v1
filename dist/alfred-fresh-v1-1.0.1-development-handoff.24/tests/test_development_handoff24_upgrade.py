@@ -12,6 +12,7 @@ from fresh_v1 import upgrade
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINES = (
+    "alfred-fresh-v1-1.0.1-development-handoff.26",
     "alfred-fresh-v1-1.0.1-development-handoff.23",
     "alfred-fresh-v1-1.0.1-development-handoff.22",
     "alfred-fresh-v1-1.0.1-development-handoff.21",
@@ -42,7 +43,7 @@ BASE_COMMIT = "f308811"
 SOURCES = {
     **transaction.DESTINATIONS,
     transaction.DEVELOPER + "publication_approval.py": "developer_v1/publication_approval.py",
-    transaction.DEVELOPER + "real_worker.py": "developer_v1/real_worker.py",
+    transaction.DEVELOPER + "real_worker.py": "development_handoff26/real_worker.py",
     transaction.DEVELOPER + "team_skills.py": "developer_v1/team_skills.py",
     transaction.DEVELOPER + "router.py": "developer_v1/router.py",
     transaction.DEVELOPER + "gateway_adapter.py": "developer_v1/gateway_adapter.py",
@@ -60,10 +61,11 @@ SOURCES = {
     "/etc/systemd/system/alfred-development-evidence.service.d/50-project-repos.conf":
         "development_handoff18/50-project-repos.conf",
     "/etc/systemd/system/alfred-development-evidence.service.d/60-claude-agents.conf":
-        "development_handoff21/60-claude-agents.conf",
+        "development_handoff26/60-claude-agents.conf",
     transaction.DEVELOPER + "agent_profiles.py": "developer_v1/agent_profiles.py",
     transaction.DEVELOPER + "agent_profiles.json": "developer_v1/agent_profiles.json",
     transaction.LIBRARY + "handoffs.py": "fresh_v1/handoffs.py",
+    transaction.LIBRARY + "host.py": "fresh_v1/host.py",  # handoff.22's installed bytes
     transaction.COMPLETION + "delivery.py": "completion_integration/delivery.py",
     transaction.COMPLETION + "runtime.py": "completion_integration/runtime.py",
     transaction.DEVELOPER + "pipeline.py": "developer_v1/pipeline.py",
@@ -169,7 +171,7 @@ def test_install_replaces_only_its_files_and_preserves_everything_else(fixture):
         assert recorded[name] == (sha or upgrade.digest(before[name.lstrip("/")][0]))
 
 
-def test_rollback_restores_the_handoff23_baseline(fixture):
+def test_rollback_restores_the_handoff26_baseline(fixture):
     root, release, pin, backup = fixture
     before = snapshot(root)
     transaction.install(release, pin, root, backup)
@@ -251,3 +253,30 @@ def test_gateway_owned_files_are_not_pinned():
 
     pinned = set(transaction.BASE) | set(transaction.DEPENDENCIES)
     assert not any(name.startswith(team_skills.GATEWAY_BIN) for name in pinned)
+
+
+@pytest.mark.parametrize("name,before", [
+    ("/usr/local/sbin/alfred-dev-ops", "dist/alfred-fresh-v1-1.0.1-development-handoff.22/ops/alfred_dev_ops.py"),
+    (transaction.DEVELOPER + "real_worker.py", "dist/alfred-fresh-v1-1.0.1-development-handoff.21/developer_v1/real_worker.py"),
+    (transaction.COMPLETION + "runtime.py", "dist/alfred-fresh-v1-1.0.1-development-handoff.11/completion_integration/runtime.py"),
+])
+def test_handoffs_23_and_26_must_be_installed_first(fixture, name, before):
+    root, release, pin, backup = fixture
+    raw = (ROOT / before).read_bytes() if (ROOT / before).is_file() else b"# before\n"
+    upgrade.target(root, name).write_bytes(raw)
+    snap = snapshot(root)
+    with pytest.raises(ValueError, match="installed contract mismatch"):
+        transaction.install(release, pin, root, backup)
+    assert snapshot(root) == snap and not backup.exists()
+
+
+def test_the_release_copy_is_the_installed_host_plus_this_fix_only():
+    installed = (ROOT / "dist/alfred-fresh-v1-1.0.1-development-handoff.22/fresh_v1/host.py").read_bytes()
+    shipped = (ROOT / "development_handoff24/host.py").read_bytes()
+    assert upgrade.digest(installed) == transaction.BASE[transaction.LIBRARY + "host.py"]
+    assert b"code_reviewer" not in shipped  # unreleased team-snapshot work stays out
+    assert b"def completion_confirmed" in shipped and b"completion_confirmed" not in installed
+    # The checkout's host.py carries the same fix on top of main's unreleased work.
+    assert b"def completion_confirmed" in (ROOT / "fresh_v1/host.py").read_bytes()
+    ops_source = (ROOT / "ops/alfred_dev_ops.py").read_bytes()
+    assert b"def confirm_delivered" in ops_source and b"def claude_token" in ops_source

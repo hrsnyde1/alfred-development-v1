@@ -13,6 +13,7 @@ handoff.23). The delivery record stayed `uncertain` with no receipt, the host re
 - host.py: the poll reads that confirmation as the task's completion and records
   complete.json. Nothing is sent or resent; the uncertain record, the attempt and the
   failure evidence are never changed.
+Installs only after handoff.23 and handoff.26, which pin these files as they are now.
 Nothing restarts. Existing delivery records are not changed.
 """
 
@@ -34,16 +35,17 @@ DROP_IN = "/etc/systemd/system/alfred-development-evidence.service.d/40-fresh-v1
 INTAKE = "/usr/local/lib/alfred-v1.1/trusted_intake.py"
 COMPLETION = "/usr/local/lib/alfred-completion-v1/completion_integration/"
 DESTINATIONS = {
-    "/usr/local/lib/alfred-fresh-v1/fresh_v1/host.py": "fresh_v1/host.py",
+    # The installed host.py plus this fix only (main also has unreleased work).
+    "/usr/local/lib/alfred-fresh-v1/fresh_v1/host.py": "development_handoff24/host.py",
     "/usr/local/sbin/alfred-dev-ops": "ops/alfred_dev_ops.py",
 }
-# Exactly the bytes handoff.22 leaves behind (handoff.23 did not change them).
+# Exactly the bytes handoffs 22 (host.py) and 26 (alfred-dev-ops) leave behind.
 BASE = {
     "/usr/local/lib/alfred-fresh-v1/fresh_v1/host.py": "d651db771116761d16c9c9d230ba8b7e7045f4bc488f5b87febfc87d02f3485d",
-    "/usr/local/sbin/alfred-dev-ops": "060860679e6b4a23aa742ea9b65b481837e1f76dc6116786bdc4076ec85d65f0",
+    "/usr/local/sbin/alfred-dev-ops": "4e460fe6c4452d65982e7f18f5eef61f8ddadf1fbfc3c9706395a9e47a2aa849",
 }
 SEMANTIC = {}
-# Everything else installed through handoff.23 must be unchanged.
+# Everything else installed through handoffs 23 and 26 must be unchanged.
 INSTALLED = {
     COMPLETION + "runtime.py": "d34fad6928b5a6b7508678887e49ce9d6fc4cd2ddfb18382ba70be26f0207c61",
     "/usr/local/lib/alfred-fresh-v1/fresh_v1/handoffs.py": "f9ff7c6636e36be1273cbade85b6f153f40c2db43d6dda3908db4256679d0b70",
@@ -71,10 +73,10 @@ INSTALLED = {
     "/usr/local/lib/alfred-fresh-v1/fresh_v1/diagnostics.py": "c5862c14b39b22b7e6faef07aea1d4c32b5ab0df20aab987d4a0fed33b763e0e",
     "/usr/local/lib/alfred-fresh-v1/v1_cto/plan.schema.json": "922a477d0d9c9cd46a0f23cc32b92f0f7881314315e185cca8661664ce03387c",
     "/opt/alfred-developer-v1/developer_v1/team_skills.py": "42a701e0b52ab65792d8d1d8837bdb69e5879bae9060810a0ad6b369b5f95c8e",
-    "/opt/alfred-developer-v1/developer_v1/real_worker.py": "e4365dec95162b4789a66cd530863011d8c9f0569027132abc39ce6b6c62097a",
+    "/opt/alfred-developer-v1/developer_v1/real_worker.py": "3fba2a76b88c9b93a5217a4e69079178d02303d09137fe93228b2807a61e01c6",
     "/opt/alfred-developer-v1/developer_v1/agent_profiles.py": "d9731eae53ffc27b4d453d946d044f2b93bde04e53e47fd9ba3221745149c775",
     "/opt/alfred-developer-v1/developer_v1/agent_profiles.json": "1194c14f4b3260dce2f2baef7e87c330c13135e2b1db28de82d9dd9d788ffd7e",
-    "/etc/systemd/system/alfred-development-evidence.service.d/60-claude-agents.conf": "701a3e3380bae95289d0cc0ca2076a10a0003a124577f30791cae20aeec8d2fe",
+    "/etc/systemd/system/alfred-development-evidence.service.d/60-claude-agents.conf": "f9c5eed1f71499771c40a2ea452dfb420e38f827eb3200290c44fe51c7b7be0a",
     "/usr/local/lib/alfred-fresh-v1/fresh_v1/qa_recovery.py": "0dfb91ff0265d8ddb669a33edf34824213118c97bd6fd334a31a81ca1c88d1c6",
     "/usr/local/lib/alfred-fresh-v1/fresh_v1/recovery.py": "d6e3f3627f5f6c82223fe16dab7ef43d619cda4d98c4edf99467a76c0df688c4",
     "/etc/systemd/system/alfred-development-evidence.service.d/50-project-repos.conf": "cf1ef2e0280c419dee9e9c48bac4d92a754a74f72f3aa59ccdcdaa09e2b82db2",

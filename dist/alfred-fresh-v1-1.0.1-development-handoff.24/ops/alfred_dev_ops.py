@@ -6,8 +6,10 @@ Only these operations exist: status, pause, resume, install <N>, rollback <N>,
 resend <task> (one fresh publication approval text for an expired one) and abandon
 <project/task> (stop one task for good, by the owner's decision) and republish
 <project/task> (one more publish attempt after a definite Publisher error) and
+claude-token (save the development agents' own long-lived Claude token) and
 confirm-delivered <project/task> (the owner received a completion text whose delivery
-record stayed uncertain; nothing is sent or resent). There is no generic command, path or argument passthrough. `install` runs a fixed sequence on a
+record stayed uncertain; nothing is sent or resent). There is no generic command, path
+or argument passthrough. `install` runs a fixed sequence on a
 pinned handoff release, executing only code from inside the hash-verified archive, never
 from the alfred-writable checkout. The owner confirms each install by typing the start of
 the archive SHA-256 from Claude's report; the helper never displays it first. Every
@@ -19,6 +21,8 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import fcntl
+import getpass
+import grp
 import hashlib
 import json
 import os
@@ -41,6 +45,9 @@ NAME = re.compile(r"alfred-fresh-v1-1\.0\.1-development-handoff\.[0-9]{1,3}\Z")
 RELEASE_KEYS = {"schema", "name", "archive_sha256", "manifest_sha256", "installer",
                 "installer_sha256", "installed_after", "preflight", "restart"}
 PYTHON = "/usr/bin/python3"
+# The development agents' own Claude token: root-owned, readable by the alfred group only.
+CLAUDE_TOKEN = Path("/etc/alfred-development/claude-agents.token")
+TOKEN = re.compile(r"[A-Za-z0-9_-]{20,400}\Z")
 
 
 class Refused(RuntimeError):
@@ -206,6 +213,28 @@ def abandon(name: str, now: float) -> dict:
     return {"task": name, "state": "abandoned", "next": "later requests run on the next poll"}
 
 
+def claude_token(token: str) -> dict:
+    """Save the agents' long-lived token from `claude setup-token`. It is never printed or
+    logged; only its fingerprint is."""
+    token = token.strip()
+    if not TOKEN.fullmatch(token):
+        raise Refused("that does not look like a Claude token; nothing was saved")
+    gid = grp.getgrnam("alfred").gr_gid
+    temporary = CLAUDE_TOKEN.with_name(CLAUDE_TOKEN.name + ".new")
+    temporary.unlink(missing_ok=True)
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        os.fchown(fd, 0, gid)
+        os.fchmod(fd, 0o640)
+        os.write(fd, (token + "\n").encode())
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(temporary, CLAUDE_TOKEN)
+    return {"claude_token": "saved", "fingerprint": hashlib.sha256(token.encode()).hexdigest()[:12],
+            "next": "agents use it from their next task"}
+
+
 MAX_PUBLISH_RETRIES = 3
 
 
@@ -357,6 +386,7 @@ def main() -> int:
     sub.add_parser("resend").add_argument("task")
     sub.add_parser("abandon").add_argument("task", help="project/task, e.g. demo-site/T-0002")
     sub.add_parser("republish").add_argument("task", help="project/task, e.g. demo-site/T-0003")
+    sub.add_parser("claude-token")
     sub.add_parser("confirm-delivered").add_argument(
         "task", help="project/task, e.g. demo-site/T-0003")
     args = parser.parse_args()
@@ -383,6 +413,9 @@ def main() -> int:
             result = abandon(args.task, dt.datetime.now(dt.timezone.utc).timestamp())
         elif args.operation == "republish":
             result = republish(args.task, dt.datetime.now(dt.timezone.utc).timestamp())
+        elif args.operation == "claude-token":
+            result = claude_token(getpass.getpass(
+                "Paste the token from `claude setup-token` (input is hidden): "))
         elif args.operation == "confirm-delivered":
             if input(f"Type RECEIVED if you got the completion text for {args.task}: "
                      ).strip() != "RECEIVED":
