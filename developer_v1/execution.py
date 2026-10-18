@@ -255,6 +255,9 @@ def invoke(
         raise Denied("invalid worktree revision")
     if _git(worktree, "status", "--porcelain"):
         raise Denied("worktree must start clean")
+    team_profile = getattr(worker, "team_profile", "builtin")
+    if type(team_profile) is not str or not re.fullmatch(r"[0-9a-f]{64}|builtin", team_profile):
+        raise Denied("team profile record invalid")
     store.claim(assignment)
     try:
         try:
@@ -335,6 +338,8 @@ def invoke(
             "known_limitations": result.get("known_limitations", []),
             "blockers": result.get("blockers", []),
             "status": status,
+            # Which owner-approved Alfred OS snapshot shaped the prompt (team_snapshot.py).
+            "team_profile": team_profile,
             "model_used": ({**actual, "reasoning_effort": used_choice.reasoning_effort,
                             "fallback_used": used_choice.fallback_used}
                            if used_choice is not None else None),

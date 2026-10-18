@@ -17,6 +17,9 @@
     "integration": {"primary": {"provider": "codex", "model": "gpt-6-sol"}, "fallback": {"provider": "codex", "model": "gpt-6.1-sol"}, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"]},
     "security": {"primary": {"provider": "codex", "model": "gpt-6-sol"}, "fallback": {"provider": "codex", "model": "gpt-6.1-sol"}, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"]},
     "mobile": {"primary": {"provider": "codex", "model": "gpt-6-sol"}, "fallback": {"provider": "codex", "model": "gpt-6.1-sol"}, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"]},
-    "performance": {"primary": {"provider": "codex", "model": "gpt-6-sol"}, "fallback": {"provider": "codex", "model": "gpt-6.1-sol"}, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"]}
+    "performance": {"primary": {"provider": "codex", "model": "gpt-6-sol"}, "fallback": {"provider": "codex", "model": "gpt-6.1-sol"}, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"]},
+    "builder": {"primary": {"provider": "codex", "model": "gpt-6-sol"}, "fallback": {"provider": "codex", "model": "gpt-6.1-sol"}, "reasoning_effort": "medium", "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"]},
+    "qa": {"primary": {"provider": "codex", "model": "gpt-6-sol"}, "fallback": {"provider": "codex", "model": "gpt-6.1-sol"}, "reasoning_effort": "medium", "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"]},
+    "code_reviewer": {"primary": {"provider": "codex", "model": "gpt-6-sol"}, "fallback": {"provider": "codex", "model": "gpt-6.1-sol"}, "reasoning_effort": "high", "tools": ["read_scoped", "write_scoped", "run_approved_check", "git_local_commit_if_granted"]}
   }
 }

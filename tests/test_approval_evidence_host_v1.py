@@ -48,7 +48,11 @@ class ApprovalEvidenceHostDelta(unittest.TestCase):
         # team_skills.py: handoff.13 loads the owner-approved team skills for specialists.
         # execution.py: handoff.15's claim scan reads only claim records.
         # agent_profiles.*: handoff.21 gives each agent its owner-reviewed identity.
-        self.assertEqual(different, {"pipeline.py", "owner_grants.py", "run_task.py", "publication_approval.py",
+        # team_snapshot.py, router.py, specialists.json, README.md and the example
+        # models: owner-approved Alfred OS team snapshots and builder, qa, code_reviewer.
+        self.assertEqual(different, {"team_snapshot.py", "router.py", "specialists.json",
+                                    "README.md", "models.codex-verified.example.json",
+                                    "pipeline.py", "owner_grants.py", "run_task.py", "publication_approval.py",
                                     "trusted_intake_development.py", "stage_approval.py", "release.sha256",
                                     "real_worker.py", "team_skills.py", "execution.py",
                                     "agent_profiles.py", "agent_profiles.json"})
