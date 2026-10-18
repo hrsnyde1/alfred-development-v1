@@ -134,6 +134,11 @@ run handoff23 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_completio
   tests/test_completion_integration.py tests/test_completion_reconciliation.py \
   tests/test_development_handoff23_upgrade.py --junitxml="$OUT/handoff23.xml"
 
+# handoff.24: the owner confirms a completion text whose delivery record stayed uncertain.
+run handoff24 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_confirm_delivered.py \
+  tests/test_publish_retry.py tests/test_development_handoff24_upgrade.py \
+  --junitxml="$OUT/handoff24.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"
