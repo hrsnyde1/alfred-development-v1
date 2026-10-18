@@ -156,6 +156,10 @@ run handoff28 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_dev_squad
 run handoff29 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_one_yes_flow.py \
   tests/test_development_handoff29_upgrade.py tests/test_completion_integration.py tests/test_dev_squads.py --junitxml="$OUT/handoff29.xml"
 
+# handoff.30: QA accepts delegated draft-PR policy.
+run handoff30 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_delegated_development_approval.py \
+  tests/test_independent_qa.py tests/test_development_handoff30_upgrade.py --junitxml="$OUT/handoff30.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"

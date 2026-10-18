@@ -86,7 +86,7 @@ class DelegatedApprovalTest(DelegationFixture):
                 self.assertEqual(len(self.sent), 1)
                 self.assertFalse(list(self.grants.glob("delegation-*.json")))
 
-    def test_publication_is_never_delegable_and_wildcards_are_refused(self):
+    def test_unknown_publication_modes_and_wildcards_are_refused(self):
         for value in (policy(publication="alfred"), policy(projects=("*",)),
                       policy(projects=("dev-999", "dev-999")),
                       {**policy(), "deploy": True}):
@@ -172,8 +172,8 @@ class DelegatedApprovalTest(DelegationFixture):
 class QADelegatedEvidenceTest(DelegationFixture):
     """Independent QA accepts delegated evidence only when it binds the exact request."""
 
-    def evidence(self):
-        self.write_policy(policy())
+    def evidence(self, publication="owner"):
+        self.write_policy(policy(publication=publication))
         reference = self.delegate()["reference"]
         self.execute(reference)
         grant_raw = (self.grants / f"grant-{reference}.json").read_bytes()
@@ -185,6 +185,12 @@ class QADelegatedEvidenceTest(DelegationFixture):
 
     def test_qa_accepts_exact_delegated_evidence(self):
         reference, grant, grant_sha, issuance, expected = self.evidence()
+        self.assertTrue(qa_worker.delegated_decision(
+            self.grants, reference, grant, grant_sha, issuance, expected))
+
+    def test_qa_accepts_delegated_evidence_when_draft_prs_are_delegated_too(self):
+        # demo-site T-0007 (2026-10-18): QA refused the evidence after handoff.29.
+        reference, grant, grant_sha, issuance, expected = self.evidence("delegated")
         self.assertTrue(qa_worker.delegated_decision(
             self.grants, reference, grant, grant_sha, issuance, expected))
 

@@ -230,7 +230,8 @@ def delegated_decision(grant_root: Path, ref: str, grant: dict, grant_sha: str,
             record.get("decided_by") == "owner_delegation_policy" and
             type(policy) is dict and record.get("policy_sha256") == policy_sha and
             policy.get("schema") == "alfred.development-delegation-policy/1" and
-            policy.get("publication_approval") == "owner" and
+            # "delegated": the owner's request "yes" also covers its draft PR (handoff.29).
+            policy.get("publication_approval") in ("owner", "delegated") and
             type(development) is dict and development.get("enabled") is True and
             type(development.get("projects")) is list and
             expected_request["project"] in development["projects"] and
