@@ -119,6 +119,12 @@ run handoff19 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_plain_req
 run handoff20 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_publish_retry.py \
   tests/test_development_handoff20_upgrade.py --junitxml="$OUT/handoff20.xml"
 
+# handoff.21: the agents run on Claude with their reviewed identities (Phase 1).
+run handoff21 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_claude_agents.py \
+  tests/test_development_handoff21_upgrade.py tests/test_developer_execution_v1.py \
+  tests/test_team_skills.py tests/test_model_message_contract.py tests/test_fix_loop.py \
+  --junitxml="$OUT/handoff21.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"
