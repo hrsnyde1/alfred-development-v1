@@ -97,7 +97,7 @@ def test_publication_text_is_plain_and_yes_publishes(world):
     assert result["state"] == "complete", result
     notice = world.notifications[0]
     assert notice.startswith(f"All done with {PROJECT}.") and task not in notice
-    assert "Nothing is live yet" in notice
+    assert "ready for you to push" in notice
 
 
 @pytest.mark.parametrize("changes", [

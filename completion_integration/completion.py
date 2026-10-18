@@ -143,7 +143,7 @@ def prepare(
                   else f"GitHub shows it merged by {actor}") + \
             ", but it isn't live until it's deployed."
     elif pr.get("state") == "open" and pr["draft"]:
-        status = "It's on GitHub as a draft for your review. Nothing is live yet."
+        status = "Built, tested and reviewed. It's ready for you to push."
     elif pr.get("state") == "open":
         status = "It's on GitHub, ready for your review. Nothing is live yet."
     else:
