@@ -134,6 +134,11 @@ run handoff23 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_completio
   tests/test_completion_integration.py tests/test_completion_reconciliation.py \
   tests/test_development_handoff23_upgrade.py --junitxml="$OUT/handoff23.xml"
 
+# handoff.26: the agents use their own Claude token; login errors fall back to Codex.
+run handoff26 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_claude_agents.py \
+  tests/test_development_handoff26_upgrade.py tests/test_alfred_dev_ops.py \
+  --junitxml="$OUT/handoff26.xml"
+
 # handoff.24: the owner confirms a completion text whose delivery record stayed uncertain.
 run handoff24 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_confirm_delivered.py \
   tests/test_publish_retry.py tests/test_development_handoff24_upgrade.py \

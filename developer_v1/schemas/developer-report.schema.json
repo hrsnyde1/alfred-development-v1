@@ -21,6 +21,7 @@
     "known_limitations": {"type": "array", "items": {"type": "string"}},
     "blockers": {"type": "array", "items": {"type": "string"}},
     "status": {"enum": ["completed", "blocked", "failed"]},
+    "team_profile": {"type": "string", "pattern": "^([0-9a-f]{64}|builtin)$"},
     "model_used": {"type": ["object", "null"], "required": ["provider", "model", "reasoning_effort", "fallback_used"], "properties": {"provider": {"type": "string"}, "model": {"type": "string"}, "reasoning_effort": {"type": "string"}, "fallback_used": {"type": "boolean"}}, "additionalProperties": false},
     "qa_handoff": {"type": "object", "required": ["ready", "baseline_revision", "changed_file_hashes"], "properties": {"ready": {"type": "boolean"}, "baseline_revision": {"type": "string"}, "changed_file_hashes": {"type": "object", "additionalProperties": {"type": "string"}}}, "additionalProperties": false}
   },

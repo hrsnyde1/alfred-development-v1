@@ -8,7 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from developer_v1 import team_skills
+from developer_v1 import team_skills, team_snapshot
 from developer_v1.router import select_specialists
 from fresh_v1.diagnostics import WorkerFailure, failure, planning_output
 from fresh_v1.handoffs import write_once
@@ -168,6 +168,15 @@ def prepare_plan(job, policy, *, remote_main=None, fetch=True):
         # Owner-approved team skills from the pinned library snapshot, recorded by id
         # and digest so the development grant (bound to this plan) fixes their text.
         team_skills.attach(plan, spec, specialists)
+        # The CTO plan step's owner-approved Alfred OS snapshot (agent "cto"). Planning
+        # is deterministic, so the files only shape a model prompt once the CTO uses
+        # one; the plan records which approved version was in force, and the owner's
+        # development grant binds that record with the plan digest.
+        cto_profile = team_snapshot.load(
+            "cto", policy.get("team_snapshots") or team_snapshot.ROOT
+        )
+        if cto_profile is not None:
+            plan["team_profile"] = cto_profile.manifest_sha256
         path = (
             Path(policy["gateway_state"])
             / "cto-plans"
@@ -268,6 +277,11 @@ def main(argv=None):
                     policy["grant_root"],
                     "--state-root",
                     policy["developer_state"],
+                    *(
+                        ["--team-snapshots", policy["team_snapshots"]]
+                        if policy.get("team_snapshots")
+                        else []
+                    ),
                 ]
             )
         output = {"state": "ready_for_independent_qa"}
