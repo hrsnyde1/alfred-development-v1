@@ -20,9 +20,11 @@ def main() -> None:
     parser.add_argument("--worktree-root", type=Path)
     parser.add_argument("--scope", action="append")
     parser.add_argument("--space-id")
+    # Default: /etc/alfred-development/approval-channel.json (absent: iMessage).
+    parser.add_argument("--channel", choices=("alfred_os", "imessage"))
     args = parser.parse_args()
     if args.revoke:
-        if args.worktree_root or args.scope or args.space_id:
+        if args.worktree_root or args.scope or args.space_id or args.channel:
             parser.error("revocation takes only project and task")
         request = {"op": "revoke_development_grant", "project": args.project,
                    "task_id": args.task}
@@ -31,7 +33,8 @@ def main() -> None:
             parser.error("challenge requires worktree root, scope, and space ID")
         request = {"op": "stage_development_approval", "project": args.project,
                    "task_id": args.task, "worktree_root": str(args.worktree_root),
-                   "scope": args.scope, "space_id": args.space_id}
+                   "scope": args.scope, "space_id": args.space_id,
+                   **({"channel": args.channel} if args.channel else {})}
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         # Longer than Intake's bounded 30s development send; no client retries.
         client.settimeout(40)
@@ -53,7 +56,7 @@ def main() -> None:
                           "task_id": args.task}))
     else:
         print(json.dumps({"state": result["state"], "challenge": result["challenge"],
-                          "message_id": result["message_id"]}))
+                          "message_id": result.get("message_id")}))
 
 
 if __name__ == "__main__":

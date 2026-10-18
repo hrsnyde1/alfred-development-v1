@@ -41,6 +41,7 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
                      delegation_policy: Path | None = None,
                      team_skills_root: Path = team_skills.ROOT,
                      team_skills_owner: int = 0, fix_round: int = 0,
+                     owner_passkey_pin: Path | None = None,
                      team_snapshot_root: Path | None = None) -> tuple[list[dict], dict]:
     """Runs only after protected authority verifies the exact Gateway inputs.
 
@@ -51,7 +52,8 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
         raise Denied("baseline differs from the owner-approved CTO plan")
     baseline_revision = approved_baseline
     authority = ProtectedDevelopmentAuthority(grant_root, environment=grant_environment,
-                                              delegation_policy=delegation_policy)
+                                              delegation_policy=delegation_policy,
+                                              owner_passkey_pin=owner_passkey_pin)
     dispatch = route(inputs.spec_raw, inputs.plan_raw, project=project, task_id=task_id,
                      repository=inputs.repository, worktree_root=worktree_root,
                      scope=scope, authorization_reference=grant_reference,

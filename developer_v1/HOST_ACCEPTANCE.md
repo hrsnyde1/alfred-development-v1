@@ -722,3 +722,336 @@ marker out and PAUSE set, and ask for a separate recovery review.
   `/var/lib/alfred-development-state` read-write, so the role identity can read
   snapshots there. The applier must make them readable by that identity and must
   not use symlinks.
+
+## Passkey approvals in Alfred OS (separate authorization)
+
+This section installs owner approvals in Alfred OS signed with the owner's passkey
+(design: hrsnyde1/alfred-hq `docs/v1-approvals-in-alfred-os-design.md`, PR #16).
+**Nothing in this section has been run against the host.** Do not dispatch a task, and
+do not text Alfred, during the procedure: the Intake also records request routes in the
+grant store, and the checker requires that store to be unchanged.
+
+What changes:
+- the development and publication issuers gain Alfred OS offers, signed approve and
+  decline, and a passkey branch in `verify()` and `prepare()` (`owner_passkey.py`,
+  `owner_approval.py`, `owner_grants.py`, `publication_approval.py`);
+- the Intake gains a second listener, `/run/alfred-development-intake/owner-approval.sock`,
+  which is off unless the root-owned `/etc/alfred-development/owner-approval.json` exists;
+- `stage_approval.py`, `stage_publication.py` take `--channel`; `pipeline.py` passes the pin
+  path to the grant authority; `fresh_v1/host.py` waits on open offers and holds a declined
+  task;
+- a new root tool, `enroll_owner_passkey.py`, and one Intake drop-in that lets `alfredos`
+  traverse the runtime directory.
+
+Unchanged: `intake.sock` and every existing op, iMessage approvals (still the default),
+delegation, Photon, Hermes, Gateway, CTO, `models.json` and every existing grant. No new
+Python dependency: ES256 is verified with the standard library (see `owner_passkey.py`).
+Only the Intake restarts.
+
+| Host file (relative to `/`) | Before | After |
+| --- | --- | --- |
+| `opt/alfred-developer-v1/developer_v1/owner_grants.py` | `898ab7f9…` | `cca55707…` |
+| `…/developer_v1/publication_approval.py` | `daea095f…` | `153b1a45…` |
+| `…/developer_v1/trusted_intake_development.py` | `aaec900a…` | `0bc7230a…` |
+| `…/developer_v1/stage_approval.py` | `800f8809…` | `8e0e842b…` |
+| `…/developer_v1/stage_publication.py` | `e887f5ff…` | `56efca4c…` |
+| `…/developer_v1/pipeline.py` | `52548e3b…` | `b722788f…` |
+| `…/developer_v1/README.md` | `47454493…` | `20214f98…` |
+| `…/developer_v1/release.sha256` | `dabaeae4…` | `fb3ad9c5…` |
+| `…/developer_v1/owner_passkey.py`, `owner_approval.py`, `enroll_owner_passkey.py`, `alfred-development-intake-owner-approval.conf` | absent | added |
+| `usr/local/lib/alfred-v1.1/trusted_intake.py` | `aaec900a…` | `0bc7230a…` |
+| `usr/local/lib/alfred-fresh-v1/fresh_v1/host.py` | `c18bafb0…` | `a97095c3…` |
+| `etc/systemd/system/alfred-development-intake.service.d/50-owner-approvals.conf` | absent | added |
+| `etc/alfred-development/owner-approval.json` | absent | written by this procedure |
+
+Full digests are in `live-acceptance/passkey-approval-update/`, regenerated only by its
+`make_pins.py` (it reads the host and writes beside itself):
+
+- `installed-before.sha256` (`8df1471b67781a86200314abc9d1f08d952ff7cd7a49da0748f405bfb89d1877`):
+  the installed bytes of every replaced file today, paths relative to `/`.
+- `staged.sha256` (`fb8ff095a7d851e1e12af1f29cb2b79c83912156ae39ce63a2fb39bcbf91f1a4`):
+  the checkout files to copy, the checker and its throwaway-passkey fixture.
+- `installed-after.sha256` (`f54805961dc7752a196300712330f0573d466d4a17bf1dfdbc54f8db37f7e4a5`):
+  every file this update installs, at its host path.
+
+The **currently installed** release manifest is
+`dabaeae44a69116ab4c9048e93554e53567decc17ff6d60e5b2fc320c3dcbc77` (PR #25's). Later
+handoffs replaced files without updating it, so it no longer verifies its own tree and
+the before-state is pinned file by file. The **new** release manifest is
+`fb3ad9c57aff9a02ecdc3506cc676cf3a4fa4729f3ee1a5b66609aa8c2e20329`; after the
+replacement it verifies every file in `/opt/alfred-developer-v1/developer_v1` (checked
+against the live tree when this section was written). The checker is
+`live-acceptance/verify_owner_passkey_host_update.py`
+(`39c1937140fde1f38241d9355b2b5ed47ef8c54f5c040cf9b554a90d93a5d228`), with
+`live-acceptance/owner_passkey_fixture.py`
+(`281179b0f6b10008c2ad16561b369b7b491db095e942d42d7b66c90d68953671`).
+
+### Read-only prechecks
+
+Every command must succeed; stop on any failure. `alfredos` must exist, Alfred OS must
+run as it, and its UID must differ from root, the Intake (`alfred`), Photon and Hermes.
+
+```bash
+set -euo pipefail
+cd /home/alfred/alfred-development-v1
+PINS=live-acceptance/passkey-approval-update
+echo "fb8ff095a7d851e1e12af1f29cb2b79c83912156ae39ce63a2fb39bcbf91f1a4  $PINS/staged.sha256" | sha256sum -c -
+echo "8df1471b67781a86200314abc9d1f08d952ff7cd7a49da0748f405bfb89d1877  $PINS/installed-before.sha256" | sha256sum -c -
+echo "f54805961dc7752a196300712330f0573d466d4a17bf1dfdbc54f8db37f7e4a5  $PINS/installed-after.sha256" | sha256sum -c -
+sha256sum -c "$PINS/staged.sha256"
+echo 'fb3ad9c57aff9a02ecdc3506cc676cf3a4fa4729f3ee1a5b66609aa8c2e20329  developer_v1/release.sha256' | sha256sum -c -
+sha256sum -c developer_v1/release.sha256
+echo 'dabaeae44a69116ab4c9048e93554e53567decc17ff6d60e5b2fc320c3dcbc77  /opt/alfred-developer-v1/developer_v1/release.sha256' | sudo sha256sum -c -
+sudo env -C / sha256sum -c "$PWD/$PINS/installed-before.sha256"
+for file in owner_passkey.py owner_approval.py enroll_owner_passkey.py alfred-development-intake-owner-approval.conf; do
+  sudo test ! -e "/opt/alfred-developer-v1/developer_v1/$file"
+done
+sudo test ! -e /etc/systemd/system/alfred-development-intake.service.d/50-owner-approvals.conf
+sudo test ! -e /etc/alfred-development/owner-approval.json
+sudo test ! -e /etc/alfred-development/owner-passkey.json
+sudo test ! -e /etc/alfred-development/approval-channel.json
+sudo test ! -e /run/alfred-development-intake/owner-approval.sock
+sudo test -f /opt/alfred-developer-v1/active
+sudo test ! -e /opt/alfred-developer-v1/passkey-approval-backup-v1
+sudo test ! -e /opt/alfred-developer-v1/passkey-approval-update-v1
+test "$(systemctl show -p User --value alfred-os.service)" = alfredos
+test "$(systemctl show -p User --value alfred-development-intake.service)" = alfred
+id -u alfredos alfred alfredmsg alfredphoton
+test "$(id -u alfredos alfred alfredmsg alfredphoton | sort -u | wc -l)" = 4
+test "$(id -u alfredos)" != 0
+systemctl is-active alfred-development-intake.service alfred-photon.service alfred-hermes.service alfred-os.service
+systemctl show -p ActiveState -p Result alfred-development-gateway.service alfred-development-gateway.timer
+sha256sum /home/alfred/Git/alfred/.dev/bin/cto.py
+```
+
+Then pause new work and wait until nothing is running: `sudo alfred-dev-ops pause`, then
+`sudo alfred-dev-ops status` must show `"pause": true` and no task with a stage in
+progress. Keep the pause until the end of the procedure.
+
+### Backup and staging (after explicit operator authorization)
+
+The fixed backup path stops if it already exists. It holds the whole installed
+`developer_v1` tree, both Intake-side files and the drop-in directory's current files, at
+their host paths, and is verified before anything is disabled. No credentials, grants,
+Intake config or state are copied. The update directory is readable by `alfred` only so
+the checker can run without root; the backup stays mode `0700`.
+
+```bash
+set -euo pipefail
+cd /home/alfred/alfred-development-v1
+PINS=$PWD/live-acceptance/passkey-approval-update
+DEV_ROOT=/opt/alfred-developer-v1
+BACKUP=$DEV_ROOT/passkey-approval-backup-v1
+UPDATE=$DEV_ROOT/passkey-approval-update-v1
+DROPINS=/etc/systemd/system/alfred-development-intake.service.d
+sudo test -f /home/alfred/Alfred/gateway/PAUSE
+sudo test ! -e "$BACKUP"
+sudo test ! -e "$UPDATE"
+sudo install -d -o root -g root -m 0700 "$BACKUP" "$BACKUP/root" "$BACKUP/root/opt/alfred-developer-v1" \
+  "$BACKUP/root/usr/local/lib/alfred-v1.1" "$BACKUP/root/usr/local/lib/alfred-fresh-v1/fresh_v1" \
+  "$BACKUP/root$DROPINS"
+sudo install -d -o root -g root -m 0755 "$UPDATE"
+sudo cp -a "$DEV_ROOT/developer_v1" "$BACKUP/root/opt/alfred-developer-v1/developer_v1"
+sudo cp -a /usr/local/lib/alfred-v1.1/trusted_intake.py "$BACKUP/root/usr/local/lib/alfred-v1.1/trusted_intake.py"
+sudo cp -a /usr/local/lib/alfred-fresh-v1/fresh_v1/host.py "$BACKUP/root/usr/local/lib/alfred-fresh-v1/fresh_v1/host.py"
+sudo cp -a "$DROPINS/." "$BACKUP/root$DROPINS/"
+sudo install -o root -g root -m 0644 "$PINS/installed-before.sha256" "$BACKUP/installed-before.sha256"
+sudo env -C "$BACKUP/root" sha256sum -c "$BACKUP/installed-before.sha256"
+while read -r sha relative; do
+  sudo install -D -o root -g root -m 0644 "$relative" "$UPDATE/$relative"
+  sudo cmp "$relative" "$UPDATE/$relative"
+done < "$PINS/staged.sha256"
+sudo install -o root -g root -m 0644 "$PINS/staged.sha256" "$UPDATE/staged.sha256"
+sudo install -o root -g root -m 0644 "$PINS/installed-after.sha256" "$UPDATE/installed-after.sha256"
+echo "fb8ff095a7d851e1e12af1f29cb2b79c83912156ae39ce63a2fb39bcbf91f1a4  $UPDATE/staged.sha256" | sudo sha256sum -c -
+echo "f54805961dc7752a196300712330f0573d466d4a17bf1dfdbc54f8db37f7e4a5  $UPDATE/installed-after.sha256" | sudo sha256sum -c -
+sudo env -C "$UPDATE" sha256sum -c staged.sha256
+```
+
+### Replacement, Intake restart and checker
+
+This is the **only host replacement**. It moves the activation marker into the verified
+backup first, then replaces each file atomically from the root-owned update directory
+(new modules before the modules that import them), adds the drop-in and the root-owned
+listener settings, verifies the new release manifest and the after pins, reloads systemd
+and restarts **only the Intake**. A failed command stops the block: then use the rollback
+block below.
+
+The checker runs as `alfred` (the Intake's user) with the marker absent. It checks:
+- the installed release manifest verifies and the installed Intake source is the released
+  module;
+- an iMessage-channel approval in a private `/tmp` store still produces a grant that
+  verifies, with source `photon_native_owner_reply`;
+- a passkey approval with a throwaway key, under that private `/tmp` root only, verifies;
+  the same grant does not verify as a host grant;
+- a forged signature, a wrong `rp_id`, user verification unset, an approve signature sent
+  as a decline, and a reused signature are each refused with nothing written;
+- a decline writes no grant, and a later approve for that offer is refused;
+- the live `owner-approval.sock` listens with an ACL of exactly its owner and `alfredos`,
+  and refuses `alfred` as a peer; `intake.sock` still listens;
+- services, the Gateway unit state, the CTO digest and the real grant store's file names
+  are unchanged.
+
+It sends no message, calls no model or worker and never reads the real grant store's
+contents. Restore the marker only if it prints `PASS` and exits zero.
+
+```bash
+set -euo pipefail
+DEV_ROOT=/opt/alfred-developer-v1
+BACKUP=$DEV_ROOT/passkey-approval-backup-v1
+UPDATE=$DEV_ROOT/passkey-approval-update-v1
+DROPINS=/etc/systemd/system/alfred-development-intake.service.d
+PY=/home/alfred/Git/alfred/.venv/bin/python
+CTO_BEFORE=$(sha256sum /home/alfred/Git/alfred/.dev/bin/cto.py | cut -d ' ' -f1)
+GATEWAY_BEFORE=$(systemctl show -p ActiveState -p Result alfred-development-gateway.service alfred-development-gateway.timer | sha256sum | cut -d ' ' -f1)
+GRANTS_BEFORE=$(sudo -u alfred env -i PYTHONPATH="$UPDATE/live-acceptance" "$PY" -B -c 'import verify_owner_passkey_host_update as v; print(v.store_listing(v.GRANTS))')
+ALFRED_OS_UID=$(id -u alfredos)
+sudo test -f /home/alfred/Alfred/gateway/PAUSE
+sudo env -C "$BACKUP/root" sha256sum -c "$BACKUP/installed-before.sha256"
+sudo env -C "$UPDATE" sha256sum -c staged.sha256
+sudo mv -T "$DEV_ROOT/active" "$BACKUP/active"
+for file in owner_passkey.py owner_approval.py enroll_owner_passkey.py alfred-development-intake-owner-approval.conf \
+            owner_grants.py publication_approval.py stage_approval.py stage_publication.py pipeline.py \
+            trusted_intake_development.py README.md release.sha256; do
+  sudo install -o root -g root -m 0644 "$UPDATE/developer_v1/$file" "$DEV_ROOT/developer_v1/$file.next"
+  sudo mv -T "$DEV_ROOT/developer_v1/$file.next" "$DEV_ROOT/developer_v1/$file"
+done
+sudo install -o root -g root -m 0644 "$UPDATE/fresh_v1/host.py" /usr/local/lib/alfred-fresh-v1/fresh_v1/host.py.next
+sudo mv -T /usr/local/lib/alfred-fresh-v1/fresh_v1/host.py.next /usr/local/lib/alfred-fresh-v1/fresh_v1/host.py
+sudo install -o root -g root -m 0644 "$UPDATE/developer_v1/trusted_intake_development.py" /usr/local/lib/alfred-v1.1/trusted_intake.py.next
+sudo mv -T /usr/local/lib/alfred-v1.1/trusted_intake.py.next /usr/local/lib/alfred-v1.1/trusted_intake.py
+sudo install -o root -g root -m 0644 "$UPDATE/developer_v1/alfred-development-intake-owner-approval.conf" "$DROPINS/50-owner-approvals.conf"
+SETTINGS=/etc/alfred-development/owner-approval.json
+sudo install -o root -g root -m 0644 /dev/null "$SETTINGS.next"
+printf '{"alfred_os_uid":%d,"approval_channel_policy":"/etc/alfred-development/approval-channel.json","owner_approval_socket":"/run/alfred-development-intake/owner-approval.sock","owner_passkey_pin":"/etc/alfred-development/owner-passkey.json","schema":"alfred.owner-approval-intake/1"}\n' "$ALFRED_OS_UID" \
+  | sudo tee "$SETTINGS.next" >/dev/null
+sudo mv -T "$SETTINGS.next" "$SETTINGS"
+test "$(sudo stat -c '%U:%G %a' "$SETTINGS")" = "root:root 644"
+echo 'fb3ad9c57aff9a02ecdc3506cc676cf3a4fa4729f3ee1a5b66609aa8c2e20329  /opt/alfred-developer-v1/developer_v1/release.sha256' | sudo sha256sum -c -
+sudo env -C "$DEV_ROOT" sha256sum -c developer_v1/release.sha256
+sudo env -C / sha256sum -c "$UPDATE/installed-after.sha256"
+sudo systemctl daemon-reload
+sudo systemctl restart alfred-development-intake.service
+sleep 3
+test "$(systemctl is-active alfred-development-intake.service)" = active
+sudo test ! -e "$DEV_ROOT/active"
+sudo -u alfred env -i PATH=/usr/bin:/bin PYTHONPATH=/opt/alfred-developer-v1:/home/alfred/Git/alfred/src:/usr/local/lib/alfred-fresh-v1 \
+  "$PY" -B "$UPDATE/live-acceptance/verify_owner_passkey_host_update.py" \
+  --cto-sha256 "$CTO_BEFORE" --gateway-sha256 "$GATEWAY_BEFORE" --grant-store-sha256 "$GRANTS_BEFORE"
+sudo mv -T "$BACKUP/active" "$DEV_ROOT/active"
+sudo test -f "$DEV_ROOT/active"
+```
+
+**PASS:** every hash check succeeds and the checker prints `PASS` and exits zero.
+Intake, Photon, Hermes and Alfred OS stay active; the Gateway state, CTO digest and the
+real grant store are unchanged; the marker is restored only afterward. Approvals still
+go to iMessage until the two separately authorized steps below. Then run
+`sudo alfred-dev-ops resume` when the owner wants new work to run.
+
+**FAIL:** any command fails, the checker prints `FAIL` or exits nonzero, any digest
+differs, or the marker reappears before the checker passes. Leave execution disabled and
+paused, and run the rollback.
+
+### Rollback
+
+**Quick, no code change** (after a PASS, if Alfred OS approvals misbehave): write the
+channel policy with `"default": "imessage"` or remove it, or remove the pin with
+`enroll_owner_passkey remove`. Passkey answers then fail closed and iMessage works as
+before.
+
+**Full** (after a partial or completed replacement, or whenever the outcome is unclear):
+it restores every replaced file from the verified backup, moves the added files and the
+listener settings into the backup, reloads systemd and restarts **only the Intake**. It
+**leaves execution disabled** (the marker ends in `$BACKUP/disabled-after-rollback`,
+PAUSE stays set) until the owner separately decides. The old verifier does not know the
+source `alfred_os_owner_passkey`, so any passkey grant becomes non-executable, never
+wrongly executable. Grants, evidence, the pin and the channel policy are kept for audit.
+
+```bash
+set -euo pipefail
+DEV_ROOT=/opt/alfred-developer-v1
+BACKUP=$DEV_ROOT/passkey-approval-backup-v1
+DROPINS=/etc/systemd/system/alfred-development-intake.service.d
+sudo env -C "$BACKUP/root" sha256sum -c "$BACKUP/installed-before.sha256"
+if sudo test -e "$DEV_ROOT/active"; then sudo mv -T "$DEV_ROOT/active" "$BACKUP/disabled-after-rollback"; fi
+if sudo test -e "$BACKUP/active"; then sudo mv -T "$BACKUP/active" "$BACKUP/disabled-after-rollback"; fi
+if sudo test -e /etc/alfred-development/owner-approval.json; then
+  sudo mv -T /etc/alfred-development/owner-approval.json "$BACKUP/owner-approval.json.removed"
+fi
+if sudo test -e "$DROPINS/50-owner-approvals.conf"; then
+  sudo mv -T "$DROPINS/50-owner-approvals.conf" "$BACKUP/50-owner-approvals.conf.removed"
+fi
+for file in owner_grants.py publication_approval.py stage_approval.py stage_publication.py pipeline.py \
+            trusted_intake_development.py README.md release.sha256; do
+  sudo install -o root -g root -m 0644 "$BACKUP/root/opt/alfred-developer-v1/developer_v1/$file" "$DEV_ROOT/developer_v1/$file.next"
+  sudo mv -T "$DEV_ROOT/developer_v1/$file.next" "$DEV_ROOT/developer_v1/$file"
+done
+for file in owner_passkey.py owner_approval.py enroll_owner_passkey.py alfred-development-intake-owner-approval.conf; do
+  if sudo test -e "$DEV_ROOT/developer_v1/$file"; then
+    sudo mv -T "$DEV_ROOT/developer_v1/$file" "$BACKUP/$file.removed"
+  fi
+done
+sudo install -o root -g root -m 0644 "$BACKUP/root/usr/local/lib/alfred-fresh-v1/fresh_v1/host.py" /usr/local/lib/alfred-fresh-v1/fresh_v1/host.py.next
+sudo mv -T /usr/local/lib/alfred-fresh-v1/fresh_v1/host.py.next /usr/local/lib/alfred-fresh-v1/fresh_v1/host.py
+sudo install -o root -g root -m 0644 "$BACKUP/root/usr/local/lib/alfred-v1.1/trusted_intake.py" /usr/local/lib/alfred-v1.1/trusted_intake.py.next
+sudo mv -T /usr/local/lib/alfred-v1.1/trusted_intake.py.next /usr/local/lib/alfred-v1.1/trusted_intake.py
+sudo find "$DEV_ROOT/developer_v1" /usr/local/lib/alfred-fresh-v1/fresh_v1 /usr/local/lib/alfred-v1.1 -maxdepth 1 -name '*.next' -type f -delete
+sudo env -C / sha256sum -c "$BACKUP/installed-before.sha256"
+echo 'dabaeae44a69116ab4c9048e93554e53567decc17ff6d60e5b2fc320c3dcbc77  /opt/alfred-developer-v1/developer_v1/release.sha256' | sudo sha256sum -c -
+for file in owner_passkey.py owner_approval.py enroll_owner_passkey.py; do sudo test ! -e "$DEV_ROOT/developer_v1/$file"; done
+sudo test ! -e "$DROPINS/50-owner-approvals.conf"
+sudo systemctl daemon-reload
+sudo systemctl restart alfred-development-intake.service
+sleep 3
+test "$(systemctl is-active alfred-development-intake.service)" = active
+test "$(systemctl is-active alfred-photon.service)" = active
+test "$(systemctl is-active alfred-hermes.service)" = active
+sudo test ! -e /run/alfred-development-intake/owner-approval.sock
+sudo test ! -e "$DEV_ROOT/active"
+sudo test -f /home/alfred/Alfred/gateway/PAUSE
+```
+
+If the backup itself fails its check, stop: do not restore from it, leave the marker out
+and PAUSE set, and ask for a separate recovery review.
+
+### Enrollment (separately authorized, after a PASS)
+
+This pins the owner's **existing Alfred OS login passkey** (Hayden's decision 2). The pin
+is root's: re-registering the passkey in Alfred OS changes nothing in V1, so approvals fail
+closed until this is run again with `--replace`. Reach Alfred OS through the tunnel on the
+fixed local port, so the page origin is exactly `http://localhost:3100` (decision 4).
+Synced passkeys (sign count 0) are allowed (decision 5); add `--no-synced-passkeys` to
+refuse them.
+
+1. In Alfred OS, open Settings → Passkey and note the fingerprint (SHA-256 of the COSE
+   public key).
+2. Run the tool. It shows the credential and fingerprint, asks for the first 12
+   characters of the fingerprint Alfred OS shows, then prints a one-line snippet.
+3. In the Alfred OS tab, open the browser console, paste the snippet, approve with
+   Face ID / Touch ID, and paste the printed line back into the terminal within
+   5 minutes. The pin is installed (`root:root 0644`) only if that test signature
+   verifies.
+
+```bash
+sudo env -i PATH=/usr/bin:/bin PYTHONPATH=/opt/alfred-developer-v1 /home/alfred/Git/alfred/.venv/bin/python -B -m developer_v1.enroll_owner_passkey pin
+```
+
+```bash
+sudo env -i PATH=/usr/bin:/bin PYTHONPATH=/opt/alfred-developer-v1 /home/alfred/Git/alfred/.venv/bin/python -B -m developer_v1.enroll_owner_passkey show
+```
+
+### Channel policy (separately authorized, after enrollment)
+
+Every new offer's default channel. Absent means iMessage. A root staging command can
+still choose per offer with `--channel alfred_os|imessage`. To switch an offer that is
+already staged, let it expire or revoke it, then re-stage. Request filing ("yes, file
+it") stays in iMessage.
+
+```bash
+POLICY=/etc/alfred-development/approval-channel.json
+sudo install -o root -g root -m 0644 /dev/null "$POLICY.next"
+printf '{"default":"alfred_os","schema":"alfred.development-approval-channel/1"}\n' | sudo tee "$POLICY.next" >/dev/null
+sudo mv -T "$POLICY.next" "$POLICY"
+```
+
+Turn it back with `"default":"imessage"`, or remove the file.

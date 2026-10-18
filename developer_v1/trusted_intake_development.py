@@ -39,6 +39,8 @@ from developer_v1.owner_grants import (
     _rename_noreplace,
 )
 from developer_v1.publication_approval import PublicationApprovalIssuer
+from developer_v1 import owner_approval
+from developer_v1.owner_passkey import PIN_PATH
 from developer_v1.undo_approval import UndoIssuer, notify_request, undo_text
 from developer_v1.router import ID, TASK, Denied
 
@@ -229,7 +231,8 @@ class IntakeGate:
                     project = json.loads(raw).get("project")
                     summary = f"{summary.rstrip('.')} ({self._display_name(project)})"
                 return self.publication_issuer.stage(raw.encode("utf-8"),
-                    space_id=request.get("space_id"), peer_uid=peer_uid, summary=summary)
+                    space_id=request.get("space_id"), peer_uid=peer_uid, summary=summary,
+                    channel=_channel(request))
             except (Denied, OSError, ValueError) as exc:
                 raise IntakeRefused("publication_request_unavailable") from exc
         if op == "prepare_publication_authorization":
@@ -321,9 +324,12 @@ class IntakeGate:
                     repository=inputs.repository, worktree_root=Path(root), scope=scope,
                     spec_decoder=inputs.spec_decoder)
                 phase = "issuer"
+                plan = json.loads(inputs.plan_raw)
                 return self.development_issuer.stage(prepared,
                     space_id=request.get("space_id"), peer_uid=peer_uid,
-                    **({"plan_raw": inputs.plan_raw} if json.loads(inputs.plan_raw).get("baseline_revision") else {}))
+                    channel=_channel(request),
+                    title=str(plan.get("objective") or "").strip().split("\n")[0] or None,
+                    **({"plan_raw": inputs.plan_raw} if plan.get("baseline_revision") else {}))
             except (Denied, OSError, ValueError) as exc:
                 try:
                     print(json.dumps(_development_failure(phase, request, exc, plan_sha256),
@@ -660,6 +666,14 @@ class IntakeGate:
                     "task_id": task_id, "project": active.project}
 
 
+def _channel(request: dict) -> str | None:
+    """A stage op's optional channel; None means the root channel policy decides."""
+    channel = request.get("channel")
+    if channel is not None and channel not in owner_approval.CHANNELS:
+        raise Denied("unknown approval channel")
+    return channel
+
+
 def _empty_draft() -> dict[str, str]:
     return {"title": "Pending draft", "task_type": "feature", "objective": "Pending.",
             "scope": "Pending.", "requirements": "Pending.", "constraints": "Pending.",
@@ -841,6 +855,74 @@ class _Handler(socketserver.BaseRequestHandler):
         self.request.sendall((json.dumps(reply, separators=(",", ":")) + "\n").encode())
 
 
+class _OwnerHandler(socketserver.BaseRequestHandler):
+    """owner-approval.sock: Alfred OS's three operations, same framing as intake.sock.
+    Replies are the contract's bare JSON objects ({"error": code} on refusal)."""
+
+    def handle(self) -> None:
+        self.request.settimeout(2)
+        peer_uid = struct.unpack("3i", self.request.getsockopt(
+            socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))[1]
+        packet = bytearray()
+        try:
+            while len(packet) <= MAX_PACKET:
+                chunk = self.request.recv(min(4096, MAX_PACKET + 1 - len(packet)))
+                if not chunk:
+                    break
+                packet.extend(chunk)
+                if b"\n" in chunk:
+                    break
+        except OSError:
+            packet = bytearray()
+        if len(packet) > MAX_PACKET or b"\n" not in packet:
+            reply = {"error": "invalid"}
+        else:
+            try:
+                request = json.loads(bytes(packet).split(b"\n", 1)[0])
+            except ValueError:
+                reply = {"error": "invalid"}
+            else:
+                reply = owner_approval.handle(self.server.service, request, peer_uid)  # type: ignore[attr-defined]
+        try:
+            self.request.sendall((json.dumps(reply, separators=(",", ":")) + "\n").encode())
+        except OSError:
+            pass
+
+
+def _restrict_socket(path: Path, uid: int) -> None:
+    """Exactly: owner rw, the Alfred OS user rw, nobody else (replaces inherited ACLs)."""
+    read_write = 0o6
+    entries = [(0x01, read_write, 0xFFFFFFFF), (0x02, read_write, uid),
+               (0x04, 0, 0xFFFFFFFF), (0x10, read_write, 0xFFFFFFFF),
+               (0x20, 0, 0xFFFFFFFF)]
+    acl = struct.pack("<I", 2) + b"".join(struct.pack("<HHI", *e) for e in entries)
+    os.setxattr(path, "system.posix_acl_access", acl, follow_symlinks=False)
+    if os.getxattr(path, "system.posix_acl_access", follow_symlinks=False) != acl:
+        raise ValueError("owner approval socket ACL not applied")
+
+
+def serve_owner_approvals(socket_path: Path, service, alfred_os_uid: int) -> None:
+    """The second listener. A failure here never stops intake.sock or iMessage."""
+    try:
+        if socket_path.exists() or socket_path.is_symlink():
+            raise ValueError("owner approval socket path already exists")
+        parent_info = socket_path.parent.lstat()
+        if (not stat.S_ISDIR(parent_info.st_mode) or parent_info.st_uid != os.geteuid()
+                or parent_info.st_mode & 0o022):
+            raise ValueError("socket parent must be owned by the protected identity")
+        server = socketserver.ThreadingUnixStreamServer(str(socket_path), _OwnerHandler)
+        server.daemon_threads = True
+        server.service = service  # type: ignore[attr-defined]
+        os.chmod(socket_path, 0o600)
+        _restrict_socket(socket_path, alfred_os_uid)
+    except (OSError, ValueError) as exc:
+        print(json.dumps({"event": "owner_approval_socket_unavailable",
+                          "error": type(exc).__name__}), file=sys.stderr, flush=True)
+        return
+    threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.2},
+                     name="owner-approvals", daemon=True).start()
+
+
 def serve(socket_path: Path, gate: IntakeGate) -> None:
     """Run only under a protected service identity with a protected socket parent."""
     if socket_path.exists() or socket_path.is_symlink():
@@ -881,15 +963,20 @@ def main() -> None:
     development_inputs = None
     if config.get("development_grant_root"):
         send = _sidecar_preview_sender(config["sidecar_port"], config["sidecar_token"])
+        passkeys = _owner_approval_config()
         development_issuer = DevelopmentGrantIssuer(
             Path(config["development_grant_root"]), owner_sender_id=config["owner_sender_id"],
             sidecar_uid=config["sidecar_uid"],
             preview_sender=_sidecar_preview_sender(config["sidecar_port"], config["sidecar_token"],
-                                                   timeout=DEVELOPMENT_SEND_TIMEOUT))
+                                                   timeout=DEVELOPMENT_SEND_TIMEOUT),
+            **({"channel_policy": passkeys["policy"], "owner_passkey_pin": passkeys["pin"]}
+               if passkeys else {}))
         publication_issuer = PublicationApprovalIssuer(
             Path(config["development_grant_root"]), owner_sender_id=config["owner_sender_id"],
             sidecar_uid=config["sidecar_uid"], preview_sender=send,
-            plan_verifier=publication_loader, delegation_policy=DELEGATION_POLICY)
+            plan_verifier=publication_loader, delegation_policy=DELEGATION_POLICY,
+            **({"channel_policy": passkeys["policy"], "owner_passkey_pin": passkeys["pin"],
+                "alfred_os_uid": passkeys["uid"]} if passkeys else {}))
         development_inputs = lambda project, task: read_gateway_inputs(
             gateway_root=Path(config["gateway_root"]), gateway_state=Path(config["gateway_dir"]),
             project_id=project, task_id=task, registry_path=Path(config["registry_path"]))
@@ -910,7 +997,61 @@ def main() -> None:
                       if development_issuer else None)
     if os.geteuid() in (gate.sidecar_uid, gate.hermes_uid):
         raise ValueError("gate identity must be distinct from both clients")
+    if development_issuer is not None and passkeys:
+        if passkeys["uid"] in (0, os.geteuid(), gate.sidecar_uid, gate.hermes_uid):
+            raise ValueError("Alfred OS identity must differ from root, Intake, sidecar and Hermes")
+
+        def development_request(offer):
+            request = offer["request"]
+            inputs = development_inputs(offer["project"], offer["task_id"])
+            current = approval_request(inputs.spec_raw, inputs.plan_raw,
+                project=offer["project"], task_id=offer["task_id"],
+                repository=inputs.repository, worktree_root=Path(request["worktree_root"]),
+                scope=request["scope"], spec_decoder=inputs.spec_decoder)
+            plan = json.loads(inputs.plan_raw)
+            return current, (inputs.plan_raw if plan.get("baseline_revision") else None)
+
+        service = owner_approval.OwnerApprovals(
+            Path(config["development_grant_root"]), development_issuer=development_issuer,
+            publication_issuer=publication_issuer, development_request=development_request,
+            alfred_os_uid=passkeys["uid"], pin_path=passkeys["pin"],
+            notice_sender=_sidecar_preview_sender(config["sidecar_port"], config["sidecar_token"]))
+        serve_owner_approvals(passkeys["socket"], service, passkeys["uid"])
     serve(Path(config["socket_path"]), gate)
+
+
+OWNER_APPROVAL_SETTINGS = Path("/etc/alfred-development/owner-approval.json")
+OWNER_APPROVAL_SCHEMA = "alfred.owner-approval-intake/1"
+OWNER_APPROVAL_KEYS = ("owner_approval_socket", "alfred_os_uid", "owner_passkey_pin",
+                       "approval_channel_policy")
+
+
+def _owner_approval_config(path: Path | None = OWNER_APPROVAL_SETTINGS, *,
+                           owner_uid: int = 0) -> dict | None:
+    """Root-owned settings that turn on the Alfred OS listener. Absent: the Intake behaves
+    exactly as before. Kept out of the Intake's own config, which its user can edit."""
+    if path is None:
+        return None
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return None
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != owner_uid
+                or info.st_mode & 0o022 or info.st_size > 1024):
+            raise ValueError("owner approval settings are not root-protected")
+        config = json.loads(stream.read())
+    if (type(config) is not dict or set(config) != {"schema", *OWNER_APPROVAL_KEYS}
+            or config["schema"] != OWNER_APPROVAL_SCHEMA
+            or config["owner_approval_socket"] != "/run/alfred-development-intake/owner-approval.sock"
+            or type(config["alfred_os_uid"]) is not int or config["alfred_os_uid"] < 1
+            or config["owner_passkey_pin"] != str(PIN_PATH)
+            or config["approval_channel_policy"] != str(owner_approval.CHANNEL_POLICY)):
+        raise ValueError("owner approval settings invalid")
+    return {"socket": Path(config["owner_approval_socket"]), "uid": config["alfred_os_uid"],
+            "pin": Path(config["owner_passkey_pin"]),
+            "policy": Path(config["approval_channel_policy"])}
 
 
 if __name__ == "__main__":
