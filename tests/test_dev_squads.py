@@ -46,7 +46,8 @@ def full_run(d, reports, project="demo-site", task_id="T-0005"):
     write(d / "plan.result.json", {}, NOW - 280)
     write(d / "developer.attempt.json", {}, NOW - 270)
     write(reports / project / task_id / "report-frontend-main.json",
-          {"specialist": "frontend", "status": "completed", "files_modified": ["index.html"],
+          {"specialist": "frontend", "status": "completed",
+           "files_modified": [{"path": "index.html", "sha256": "0" * 64}],  # the real shape
            "work_completed": "Added the footer line.",
            "model_used": {"provider": "codex", "model": "gpt-6-sol"}}, NOW - 260)
     write(d / "developer.result.json", {"state": "ready_for_independent_qa"}, NOW - 259)
@@ -178,3 +179,28 @@ def test_the_units_run_it_sandboxed_as_a_oneshot():
     assert "IPAddressDeny=any" in service and "IPAddressAllow=localhost" in service
     assert "StateDirectory=alfred-dev-squads" in service and "ProtectSystem=strict" in service
     assert "OnUnitInactiveSec=20s" in timer
+
+
+def test_a_malformed_task_is_skipped_and_the_others_still_post(tmp_path):
+    jobs, reports, d = task(tmp_path, task_id="T-0006")
+    write(d / "plan.result.json", {}, NOW - 280)
+    bad = jobs / "demo-site" / "T-0005"
+    write(bad / "context.json", {"specialists": ["frontend"], "scope": 7}, NOW - 300)
+    write(bad / "plan.result.json", {}, NOW - 280)
+    bridge = FakeBridge()
+    assert squads.run(jobs, reports, tmp_path / "s.json", bridge, NOW)["posted"] == 1
+    assert "T-0006" in bridge.sent[0][2]
+
+
+def test_every_real_report_on_this_host_can_be_told(tmp_path):
+    """Read-only: the developer reports already on the host, where readable."""
+    found = list(squads.REPORTS.glob("*/*/report-*.json")) if squads.REPORTS.is_dir() else []
+    readable = [p for p in found if os.access(p, os.R_OK)]
+    if not readable:
+        pytest.skip("no readable developer reports here")
+    for report_path in readable:
+        project, task_id = report_path.parent.parent.name, report_path.parent.name
+        d = tmp_path / "jobs" / project / task_id
+        report = json.loads(report_path.read_text())
+        write(d / "context.json", {"specialists": [report.get("specialist")], "scope": []}, NOW)
+        squads.events(d, squads.REPORTS, NOW)  # must not raise

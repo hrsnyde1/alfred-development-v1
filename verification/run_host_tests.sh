@@ -148,6 +148,10 @@ run handoff24 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_confirm_d
 run handoff27 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_dev_squads.py \
   tests/test_development_handoff27_upgrade.py --junitxml="$OUT/handoff27.xml"
 
+# handoff.28: the squads announcer reads real developer reports.
+run handoff28 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_dev_squads.py \
+  tests/test_development_handoff28_upgrade.py --junitxml="$OUT/handoff28.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"
