@@ -43,7 +43,9 @@ POLICY = Path("/etc/alfred-fresh-v1/policy.json")
 SCHEMAS = ("alfred.fresh-v1-policy/1", "alfred.fresh-v1-policy/2")
 PROJECT_KEYS = ("allowed_scope", "base_branch", "destination", "repository", "specialists")
 # The specialists this pipeline can staff today. Each project allows a subset.
-SUPPORTED_SPECIALISTS = ("backend", "frontend")
+# builder, qa and code_reviewer own a whole task on their own; only frontend and
+# backend split one task's files between them.
+SUPPORTED_SPECIALISTS = ("backend", "frontend", "builder", "qa", "code_reviewer")
 PROJECT_ID = re.compile(r"[a-z][a-z0-9-]{1,31}\Z")
 SCOPE_PATH = re.compile(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*\Z")
 
@@ -97,6 +99,8 @@ def work_items(scope: list[str], specialists: list[str], objective: str) -> list
         raise ValueError("work cannot be staffed")
     if len(specialists) == 1:
         owned = {specialists[0]: list(scope)}
+    elif not set(specialists) <= {"frontend", "backend"}:
+        raise ValueError("work cannot be staffed")
     else:
         owned = {
             "frontend": [p for p in scope if p.lower().endswith(WEB_SUFFIXES)],
@@ -104,7 +108,8 @@ def work_items(scope: list[str], specialists: list[str], objective: str) -> list
         }
     if any(not owned[s] for s in specialists):
         raise ValueError("a staffed specialist has no approved files")
-    order = [s for s in ("backend", "frontend") if s in specialists]
+    order = ([s for s in ("backend", "frontend") if s in specialists]
+             if len(specialists) > 1 else list(specialists))
     return [{"id": f"{s}-main", "specialist": s, "files": owned[s],
              "depends_on": [f"{d}-main" for d in order[:order.index(s)]],
              "objective": objective} for s in order]

@@ -10,13 +10,15 @@ from pathlib import Path
 from .execution import AssignmentStore, _git, build_assignments, invoke, qa_manifest
 from .gateway_adapter import GatewayInputs, read_gateway_inputs
 from .owner_grants import ProtectedDevelopmentAuthority, _digest
-from . import agent_profiles, team_skills
-from .real_worker import (CodexReadOnlyBroker, DeveloperWorker, RoutingBroker,
-                          create_worktree)
+from . import agent_profiles, team_skills, team_snapshot
+from .real_worker import (MAX_PRACTICES, CodexReadOnlyBroker, DeveloperWorker,
+                          RoutingBroker, create_worktree)
 from .router import (CAPABILITY_BY_ROLE, Denied, ModelChoice, route, select_model,
                      task_complexity)
 
 PROVIDERS = {"codex", "claude"}
+# V1 specialists whose built-in profile in agent_profiles.json has another id.
+BUILTIN_PROFILE = {"code_reviewer": "reviewer"}
 CHECK = ["/usr/bin/python3", "-m", "unittest", "discover", "-v"]
 
 
@@ -38,7 +40,8 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
                      grant_environment: str = "host", baseline_revision: str | None = None,
                      delegation_policy: Path | None = None,
                      team_skills_root: Path = team_skills.ROOT,
-                     team_skills_owner: int = 0, fix_round: int = 0) -> tuple[list[dict], dict]:
+                     team_skills_owner: int = 0, fix_round: int = 0,
+                     team_snapshot_root: Path | None = None) -> tuple[list[dict], dict]:
     """Runs only after protected authority verifies the exact Gateway inputs.
 
     fix_round > 0 redoes the same approved work from the same baseline after QA or
@@ -68,7 +71,15 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
     # Verified before the grant is claimed, so a missing or altered snapshot
     # leaves the owner's grant unused.
     skills = team_skills.for_plan(plan, team_skills_root, owner=team_skills_owner)
-    identities = {s: agent_profiles.identity(s) for s in dispatch["specialists"]}
+    # Owner-approved Alfred OS files, when a verified snapshot exists; otherwise the
+    # built-in profile exactly as before. Read once, before the grant is claimed.
+    budget = MAX_PRACTICES - len(json.dumps(skills, ensure_ascii=False).encode())
+    profiles = {s: team_snapshot.profile(
+                    s, agent_profiles.identity(BUILTIN_PROFILE.get(s, s)),
+                    root=team_snapshot_root, budget=budget)
+                for s in dispatch["specialists"]}
+    identities = {s: text for s, (text, _) in profiles.items()}
+    team_records = {s: record for s, (_, record) in profiles.items()}
     overrides = overrides or {}
     if set(overrides) - set(dispatch["specialists"]):
         raise Denied("model override outside assigned specialists")
@@ -103,7 +114,7 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
         result = _execute_claimed(inputs, dispatch, assignments, choices,
                                   worktree_root, state_root, project, task_id,
                                   broker, checks, authority, baseline_revision, skills,
-                                  fix_round, identities)
+                                  fix_round, identities, team_records)
     except BaseException as exc:
         authority.finish(grant_reference, status="failed" if isinstance(exc, Exception) else "uncertain",
                          fix_round=fix_round)
@@ -114,7 +125,7 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
 
 def _execute_claimed(inputs, dispatch, assignments, choices, worktree_root,
                      state_root, project, task_id, broker, checks, authority, baseline_revision,
-                     skills=(), fix_round=0, identities=None):
+                     skills=(), fix_round=0, identities=None, team_records=None):
     state = AssignmentStore(state_root / project / task_id)
     # A single final branch carries every completed developer commit to QA.
     final = create_worktree(inputs.repository, worktree_root, project, task_id,
@@ -134,7 +145,9 @@ def _execute_claimed(inputs, dispatch, assignments, choices, worktree_root,
                                    item["id"], _git(final, "rev-parse", "HEAD"))
         worker = DeveloperWorker(broker, objective=item["objective"],
                                  checks=checks or [CHECK], fallback=fallback, skills=skills,
-                                 identity=(identities or {}).get(item["specialist"], ""))
+                                 identity=(identities or {}).get(item["specialist"], ""),
+                                 team_profile=(team_records or {}).get(item["specialist"],
+                                                                        team_snapshot.BUILTIN))
         report = invoke(dispatch, item, worktree=worktree, model=first, worker=worker,
                         store=state, trusted_authority=authority, approved_fallback=fallback)
         reports.append(report)

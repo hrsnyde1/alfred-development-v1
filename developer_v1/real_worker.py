@@ -291,9 +291,12 @@ def apply_edits(worktree: Path, edits: list[dict], allowed: list[str]) -> None:
 class DeveloperWorker:
     def __init__(self, broker, *, objective: str,
                  checks: list[list[str]], fallback: ModelChoice | None = None,
-                 skills: list[dict] | tuple = (), identity: str = ""):
+                 skills: list[dict] | tuple = (), identity: str = "",
+                 team_profile: str = "builtin"):
         self.broker, self.objective, self.checks, self.fallback = broker, objective, checks, fallback
         self.skills, self.identity = list(skills), identity
+        # Manifest SHA-256 of the Alfred OS snapshot in `identity`, or "builtin".
+        self.team_profile = team_profile
         if (len(json.dumps(self.skills, ensure_ascii=False).encode())
                 + len(identity.encode())) > MAX_PRACTICES:
             raise Denied("team practices exceed the model budget")

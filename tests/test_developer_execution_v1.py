@@ -127,7 +127,7 @@ class ExecutionFixture(unittest.TestCase):
                    grant_environment="staging")
 
     def test_grant_requires_native_owner_target_and_exact_binding(self):
-        self.assertEqual(len(SPECIALISTS), 11)
+        self.assertEqual(len(SPECIALISTS), 14)
         with self.assertRaises(Denied):
             self.execute("unapproved", FixtureBroker())
         self.issuer.stage(self.request, space_id="dm-owner", peer_uid=0)

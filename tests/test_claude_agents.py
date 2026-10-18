@@ -255,7 +255,10 @@ def test_each_role_runs_on_its_profile_model_with_a_codex_fallback(role):
 
 def test_the_new_catalog_keeps_every_existing_codex_model():
     live_shape = json.loads((ROOT / "developer_v1/models.codex-verified.example.json").read_text())
-    assert set(MODELS["specialists"]) == set(live_shape["specialists"])
+    # handoff.21's catalog predates builder, qa and code_reviewer; their slots come
+    # from the Alfred OS applier, and V1 fails closed before the grant without them.
+    assert set(live_shape["specialists"]) - set(MODELS["specialists"]) == {
+        "builder", "qa", "code_reviewer"}
     assert set(MODELS["providers"]) == {"claude", "codex"}
 
 
@@ -264,4 +267,6 @@ def test_the_pipeline_accepts_claude_and_codex_but_nothing_else():
     source = (ROOT / "developer_v1/pipeline.py").read_text()
     assert 'providers[first.provider][first.model]["max_task_cost"]' in source
     # Profiles are read before the grant is claimed, so a bad bundle leaves it unused.
-    assert source.index("agent_profiles.identity(s)") < source.index("authority.claim(")
+    assert source.index("agent_profiles.identity(") < source.index("authority.claim(")
+    # So are the owner-approved Alfred OS snapshots (team_snapshot.py).
+    assert source.index("team_snapshot.profile(") < source.index("authority.claim(")

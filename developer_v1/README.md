@@ -1,6 +1,6 @@
 # Alfred Development V1 — Developer execution staging
 
-The eleven specialist definitions, CTO router, shared assignment schemas and
+The fourteen specialist definitions, CTO router, shared assignment schemas and
 coordination logic remain in this package. This milestone adds a protected
 development grant path, one reusable real worker, an on-demand Gateway entry
 point and a disposable real-model acceptance test. Nothing in this staging
@@ -47,6 +47,21 @@ tree is installed or active on the host.
    File hashes, check outcomes, commits and the actual model used appear in
    the Developer report. A completed report produces `alfred.qa-input/1`; QA
    itself remains a separate future stage.
+
+## Owner-approved team snapshots (Alfred OS)
+
+`team_snapshot.py` reads `/var/lib/alfred-development-state/team/<agent>/`
+(`run_task.py --team-snapshots`, or the policy's `team_snapshots`, overrides the
+base) after Hayden approves an agent's files with a passkey in Alfred OS. It never
+writes there. Without a team directory or `manifest.json` nothing changes. A
+present snapshot is used only when every listed file is a regular, non-symlinked
+file of at most 200 KB whose SHA-256 matches `alfred.team-snapshot/1`; otherwise
+the whole snapshot is ignored with a warning naming only the agent id. The prompt
+is the built-in profile, one style line, Soul, Role, Skills, Workflow, Quality and
+handoffs, Memory as context, Tools as guidance, then V1's safety rules last. Text
+never grants anything: model, effort and tools stay in `models.json`. Each
+Developer report records `team_profile` (manifest SHA-256 or `builtin`); a CTO
+plan made with a `cto` snapshot records its digest as `team_profile`.
 
 The generic model contract can name other providers. This staged execution
 backend accepts only the authenticated Codex provider; an unsupported or
