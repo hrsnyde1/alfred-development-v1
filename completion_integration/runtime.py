@@ -19,6 +19,9 @@ CONFIG = Path("/etc/alfred-completion-v1/config.json")
 INTAKE_CONFIG = Path("/home/alfred/Alfred/gateway/v1-1-intake.json")
 PAUSE = Path("/home/alfred/Alfred/gateway/PAUSE")
 MAX_BYTES = 1024 * 1024
+CONNECT_TIMEOUT = 2
+# Well inside the worker's own limit; a slower acknowledgement stays uncertain.
+ACK_TIMEOUT = 30
 BINDING_FIELDS = {
     "project",
     "task_id",
@@ -152,6 +155,11 @@ class PhotonSender:
 
     This confirms SDK send acceptance, not end-to-end delivery or owner reading.
     There are no retries and no fallback routes.
+
+    The sidecar answers only after Photon's remote send returns, so the message can
+    reach the owner seconds before the acknowledgement. Connecting stays short (if it
+    fails, nothing was sent); waiting for the acknowledgement does not. A two-second
+    wait recorded demo-site T-0003's delivered text as uncertain.
     """
 
     def __init__(self, *, port, token, space_id, connection=http.client.HTTPConnection):
@@ -172,8 +180,10 @@ class PhotonSender:
         )
 
     def __call__(self, notification):
-        conn = self.connection("127.0.0.1", self.port, timeout=2)
+        conn = self.connection("127.0.0.1", self.port, timeout=CONNECT_TIMEOUT)
         try:
+            conn.connect()
+            conn.sock.settimeout(ACK_TIMEOUT)
             body = json.dumps(
                 {"spaceId": self.space_id, "text": notification.text, "format": "text"}
             ).encode()
