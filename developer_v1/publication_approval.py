@@ -9,7 +9,8 @@ import time
 import uuid
 from pathlib import Path
 
-from .owner_grants import MAX_AGE, _bytes, _digest, _event_time, _read, _write_once
+from .owner_grants import (MAX_AGE, _bytes, _digest, _event_time, _read, _write_once,
+                           load_delegation_policy, publication_delegation_permits)
 from .router import Denied
 
 PLAN_SHA = "511fa533fd9dc5bb41d51bff1baa21b28a54b8b0b670e5b3f0f602a78d38b903"
@@ -22,6 +23,8 @@ BOUND = {
     "final_revision": "89ba188f8a2f801d433a30c9c21363efb3e1043d",
 }
 REF = re.compile(r"[0-9a-f]{32}\Z")
+DELEGATED = "alfred.publication-delegation/1"
+DELEGATED_DECISION = "alfred.publication-delegated-decision/1"
 
 
 def _phrase(reference: str, bound: dict | None = None) -> str:
@@ -190,7 +193,8 @@ def _check_decision(receipt: dict, decision: dict, reference: str) -> None:
 
 class PublicationApprovalIssuer:
     def __init__(self, root: Path, *, owner_sender_id: str, preview_sender,
-                 sidecar_uid: int, clock=time.time, admin_uid: int = 0, plan_verifier=None):
+                 sidecar_uid: int, clock=time.time, admin_uid: int = 0, plan_verifier=None,
+                 delegation_policy: Path | None = None, policy_owner: int = 0):
         # The development issuer already validates this same private Intake store.
         from .owner_grants import _protected
         _protected(root)
@@ -200,6 +204,38 @@ class PublicationApprovalIssuer:
         self.sidecar_uid, self.admin_uid, self.clock = sidecar_uid, admin_uid, clock
         self._lock = threading.Lock()
         self.plan_verifier = plan_verifier
+        # The owner's delegation policy (root-owned), read on every use, so turning it
+        # off applies to the next draft PR. None: the owner answers each one.
+        self.delegation_policy, self.policy_owner = delegation_policy, policy_owner
+
+    def _policy(self) -> dict | None:
+        return load_delegation_policy(self.delegation_policy, owner_uid=self.policy_owner)
+
+    def _delegate(self, bound: dict, plan_sha: str, policy: dict) -> dict:
+        """The owner's policy approves this exact draft PR, so no text is sent. The record
+        says so plainly and never claims an owner reply."""
+        for decided in self.root.glob("publication-decision-*.json"):
+            old_ref = decided.stem.removeprefix("publication-decision-")
+            if _read(self.root, f"publication-challenge-{old_ref}.json").get("plan_sha256") == plan_sha:
+                raise Denied("publication decision already exists for this plan")
+        reference = uuid.uuid4().hex
+        now = self.clock()
+        receipt = {"schema": DELEGATED, "reference": reference, "plan_sha256": plan_sha,
+                   **bound, "owner_id": self.owner, "policy_sha256": _digest(policy),
+                   "issued_at": now, "expires_at": now}
+        decision = {"schema": DELEGATED_DECISION, "reference": reference,
+                    "challenge_sha256": _digest(receipt),
+                    "owner_event_id": f"delegated-publication-{reference}",
+                    "accepted_at": now, "peer_uid": self.admin_uid}
+        _write_once(self.root, f"publication-challenge-{reference}.json", receipt)
+        _write_once(self.root, f"publication-decision-{reference}.json", decision)
+        _write_once(self.root, f"publication-issuance-{reference}.json", {
+            "schema": "alfred.publication-decision-issuance/1",
+            "reference": reference, "challenge_sha256": _digest(receipt),
+            "decision_sha256": _digest(decision),
+            "bundle_sha256": _digest(_bytes(receipt) + _bytes(decision)),
+            "issued_at": now})
+        return {"state": "publication_delegated", "challenge": reference, "message_id": None}
 
     def _context(self, raw: bytes) -> tuple[dict, str, tuple[tuple[str, str], ...]]:
         if self.plan_verifier is None:
@@ -235,6 +271,10 @@ class PublicationApprovalIssuer:
             raise Denied("publication staging requires administrator and DM")
         bound, plan_sha, notes = self._context(plan_raw)
         summary = None if summary is None else _summary(summary)
+        policy = self._policy() if summary is not None else None
+        if publication_delegation_permits(policy, bound["project"]):
+            with self._lock:
+                return self._delegate(bound, plan_sha, policy)
         with self._lock:
             for path in self.root.glob("publication-pending-*.json"):
                 reference = path.stem.removeprefix("publication-pending-")
@@ -353,10 +393,26 @@ class PublicationApprovalIssuer:
         decision = _read(self.root, f"publication-decision-{reference}.json")
         issuance = _read(self.root, f"publication-issuance-{reference}.json")
         bound, plan_sha, notes = self._receipt_context(receipt)
-        _check_receipt(receipt, reference, bound, plan_sha, notes)
-        _check_decision(receipt, decision, reference)
-        if receipt["owner_id"] != self.owner or decision["peer_uid"] != self.sidecar_uid:
-            raise Denied("publication decision identity mismatch")
+        if receipt.get("schema") == DELEGATED:
+            # Rechecked against the policy as it is now: delegation turned off (or the
+            # project removed) since staging means no draft PR from this record.
+            if (set(receipt) != {"schema", "reference", "plan_sha256", *BOUND, "owner_id",
+                                 "policy_sha256", "issued_at", "expires_at"}
+                    or receipt["reference"] != reference or receipt["plan_sha256"] != plan_sha
+                    or any(receipt.get(k) != v for k, v in bound.items())
+                    or receipt["owner_id"] != self.owner
+                    or not publication_delegation_permits(self._policy(), bound["project"])
+                    or decision != {"schema": DELEGATED_DECISION, "reference": reference,
+                                    "challenge_sha256": _digest(receipt),
+                                    "owner_event_id": f"delegated-publication-{reference}",
+                                    "accepted_at": receipt["issued_at"],
+                                    "peer_uid": self.admin_uid}):
+                raise Denied("delegated publication evidence invalid")
+        else:
+            _check_receipt(receipt, reference, bound, plan_sha, notes)
+            _check_decision(receipt, decision, reference)
+            if receipt["owner_id"] != self.owner or decision["peer_uid"] != self.sidecar_uid:
+                raise Denied("publication decision identity mismatch")
         if (issuance != {"schema": "alfred.publication-decision-issuance/1",
                          "reference": reference, "challenge_sha256": _digest(receipt),
                          "decision_sha256": _digest(decision),

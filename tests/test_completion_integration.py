@@ -138,7 +138,7 @@ def test_merged_owner_wording_requires_both_readback_and_attestation(world):
 @pytest.mark.parametrize(
     "state,draft,expected",
     [
-        ("open", True, "as a draft for your review. Nothing is live yet"),
+        ("open", True, "Built, tested and reviewed. It's ready for you to push."),
         ("open", False, "ready for your review. Nothing is live yet"),
         ("closed", False, "closed without merging"),
     ],

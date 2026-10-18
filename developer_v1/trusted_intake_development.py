@@ -33,6 +33,7 @@ from alfred.gateway.requesters import require_bound_requester
 from developer_v1.approval_transition import approval_request
 from developer_v1.gateway_adapter import read_gateway_inputs
 from developer_v1.owner_grants import (
+    DELEGATION_POLICY,
     DevelopmentGrantIssuer,
     DevelopmentSendFailure,
     _rename_noreplace,
@@ -50,15 +51,28 @@ DRAFT_FIELDS = (
     "constraints", "acceptance_criteria", "security_considerations",
     "testing_requirements",
 )
-_ACTION = re.compile(r"\b(?:build|fix|implement|develop|code|update|change|modify|refactor|test|debug|create|add|remove|investigate|improve)\b|\blook\s+into\b", re.I)
-_SOFTWARE = re.compile(r"\b(?:software|code|repo|repository|project|app|application|bug|feature|login|test|endpoint|api|website|site|page|service|server|bot|script|gateway|workflow|database|ui)\b", re.I)
-_INFORMATION_ONLY = re.compile(r"^\s*(?:what(?:'s|\s+is)|why|how|when|where|who)\b", re.I)
+# The owner says what they want in their own words ("I want…", "make…", "can you…").
+_ACTION = re.compile(
+    r"\b(?:build|fix|implement|develop|code|update|change|modify|refactor|test|debug|create|"
+    r"add|remove|delete|investigate|improve|make|set|style|restyle|rename|move|replace|"
+    r"adjust|tweak|redesign|design|polish|clean|convert|turn|swap|switch|show|hide|display|"
+    r"put|place|include|insert|enable|disable|support|handle|connect|integrate|migrate|"
+    r"optimi[sz]e|speed|upgrade|rewrite|redo|rework|align|center|resize|recolou?r|color|"
+    r"colour|want|need|like|let'?s|should|could|would|can|please)\b"
+    r"|\blook\s+into\b|\bset\s+up\b|\bget\s+rid\s+of\b", re.I)
+_SOFTWARE = re.compile(r"\b(?:software|code|repo|repository|project|app|application|bug|feature|login|test|endpoint|api|website|site|page|service|server|bot|script|gateway|workflow|database|ui|button|footer|header|navbar|menu|form|layout|theme|color|colour|font|style|css|html|dashboard|screen|component|banner|homepage|home\s+page|landing\s+page|image|logo|icon|section|card|sidebar|modal|popup|dropdown|tab|table|chart|graph|animation|mobile|responsive)\b", re.I)
+# Only a plain question about how things are, not "can you…" or "could you…".
+_INFORMATION_ONLY = re.compile(r"^\s*(?:what(?:'s|\s+is|\s+are)|why|how\s+(?:is|are|does|do|did)|when|where|who)\b", re.I)
 
 
 def _development_request_text(text: str, *, project: str | None = None) -> bool:
-    """Fail closed on clearly ordinary chat; unclear requests need a fresh wording."""
-    return (not _INFORMATION_ONLY.search(text) and bool(_ACTION.search(text))
-            and bool(project or _SOFTWARE.search(text)))
+    """A request names a registered project, or asks for software work in any wording.
+    Plain questions stay chat. The owner still confirms the preview before anything runs."""
+    if _INFORMATION_ONLY.search(text):
+        return False
+    if project:
+        return True
+    return bool(_ACTION.search(text)) and bool(_SOFTWARE.search(text))
 class IntakeRefused(ValueError):
     def __init__(self, code: str):
         self.code = code
@@ -833,7 +847,7 @@ def main() -> None:
         publication_issuer = PublicationApprovalIssuer(
             Path(config["development_grant_root"]), owner_sender_id=config["owner_sender_id"],
             sidecar_uid=config["sidecar_uid"], preview_sender=send,
-            plan_verifier=publication_loader)
+            plan_verifier=publication_loader, delegation_policy=DELEGATION_POLICY)
         development_inputs = lambda project, task: read_gateway_inputs(
             gateway_root=Path(config["gateway_root"]), gateway_state=Path(config["gateway_dir"]),
             project_id=project, task_id=task, registry_path=Path(config["registry_path"]))

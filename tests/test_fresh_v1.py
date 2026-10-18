@@ -578,8 +578,7 @@ def test_native_request_to_real_workers_draft_and_completion(world):
     ] == ["alfred", "alfredqa", "alfredreview", "alfredpublish"]
     # Plain language for the owner: no task number, clearly not live.
     assert task not in world.notifications[0]
-    assert "draft for your review" in world.notifications[0]
-    assert "Nothing is live yet" in world.notifications[0]
+    assert "ready for you to push" in world.notifications[0]
     assert world.tick()["state"] == "complete"
     assert (
         len(world.messages) == 3 and len(world.pushes) == len(world.notifications) == 1

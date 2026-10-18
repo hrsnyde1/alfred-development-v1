@@ -184,7 +184,11 @@ def events(directory: Path, reports: Path, now: float) -> list[dict]:
                 f"🔁 Fix round {stage.rsplit('-', 1)[1]} on {name}: back to "
                 f"{', '.join(TITLES[s] for s in specialists)} with the findings above.")
         elif stage.startswith("publication-challenge"):
-            add(stage, at, f"📨 {name} is ready; waiting for Hayden's go-ahead to publish.")
+            if result.get("state") == "publication_delegated":
+                add(stage, at, f"📦 {name} passed review; opening the draft PR "
+                               "(Hayden approved it with the request).")
+            else:
+                add(stage, at, f"📨 {name} is ready; waiting for Hayden's go-ahead to publish.")
         elif stage == "publisher" or stage.startswith("publisher-retry-"):
             if result.get("status") == "PUBLISHED_DRAFT" and result.get("draft_pr_url"):
                 add("published", at, f"🚀 {name} is on GitHub as a draft: {result['draft_pr_url']}")

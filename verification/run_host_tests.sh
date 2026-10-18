@@ -152,6 +152,10 @@ run handoff27 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_dev_squad
 run handoff28 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_dev_squads.py \
   tests/test_development_handoff28_upgrade.py --junitxml="$OUT/handoff28.xml"
 
+# handoff.29: one yes takes a request to a draft PR; requests in the owner's own words.
+run handoff29 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_one_yes_flow.py \
+  tests/test_development_handoff29_upgrade.py tests/test_completion_integration.py tests/test_dev_squads.py --junitxml="$OUT/handoff29.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"
