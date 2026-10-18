@@ -1,0 +1,5 @@
+{
+  "/opt/alfred-developer-v1/developer_v1/real_worker.py": "e4365dec95162b4789a66cd530863011d8c9f0569027132abc39ce6b6c62097a",
+  "/usr/local/sbin/alfred-dev-ops": "060860679e6b4a23aa742ea9b65b481837e1f76dc6116786bdc4076ec85d65f0",
+  "/etc/systemd/system/alfred-development-evidence.service.d/60-claude-agents.conf": "701a3e3380bae95289d0cc0ca2076a10a0003a124577f30791cae20aeec8d2fe"
+}
