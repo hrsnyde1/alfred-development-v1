@@ -160,6 +160,12 @@ run handoff29 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_one_yes_f
 run handoff30 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_delegated_development_approval.py \
   tests/test_independent_qa.py tests/test_development_handoff30_upgrade.py --junitxml="$OUT/handoff30.xml"
 
+# handoff.31: automatic squash merge after QA and review, and the owner's "undo".
+run handoff31 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_auto_merge_undo.py \
+  tests/test_development_handoff31_upgrade.py tests/test_delegated_development_approval.py \
+  tests/test_one_yes_flow.py tests/test_completion_integration.py tests/test_dev_squads.py \
+  --junitxml="$OUT/handoff31.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"

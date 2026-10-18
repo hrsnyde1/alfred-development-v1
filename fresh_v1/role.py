@@ -211,6 +211,8 @@ def main(argv=None):
             "prepare",
             "publish",
             "completion",
+            "merge",
+            "revert",
         ),
     )
     parser.add_argument("--job", type=Path, required=True)
@@ -337,6 +339,17 @@ def main(argv=None):
                 token_file=Path(policy["publisher_token"]),
                 **paths,
             )
+    elif args.stage in {"merge", "revert"}:
+        # handoff.31: under the root-sealed merge or undo authorization only.
+        from draft_pr_publisher.worker import merge, revert
+
+        output = (merge if args.stage == "merge" else revert)(
+            output_root=args.job / "publisher-output",
+            authorization_path=args.job
+            / "publication"
+            / f"{'merge' if args.stage == 'merge' else 'undo'}-authorization.json",
+            token_file=Path(policy["publisher_token"]),
+        )
     else:
         from completion_integration.runtime import run
 

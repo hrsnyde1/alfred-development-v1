@@ -2,6 +2,11 @@
 
 Preparation is read-only. Publication requires a separate root-owned owner
 authorization record. Only Git push and create-draft-PR are write operations.
+
+From handoff.31 (owner-authorized 2026-10-18) two more operations exist, each behind its
+own root-owned record: one squash merge of the task's own draft PR under the owner's
+delegated merge policy, and one revert of exactly that squash commit after the owner's
+verified "undo" reply.
 """
 from __future__ import annotations
 
@@ -30,15 +35,17 @@ GENERAL_REVIEW_CRITERION = "Correctness, maintainability, security, and approved
 
 
 class PublicationError(Exception):
-    def __init__(self, requirement: str, detail: str):
+    def __init__(self, requirement: str, detail: str, status: int | None = None):
         super().__init__(detail)
         self.requirement = requirement
         self.detail = detail
+        # GitHub's HTTP status when it answered with a refusal; None when no answer.
+        self.status = status
 
 
-def require(ok: bool, requirement: str, detail: str) -> None:
+def require(ok: bool, requirement: str, detail: str, status: int | None = None) -> None:
     if not ok:
-        raise PublicationError(requirement, detail)
+        raise PublicationError(requirement, detail, status)
 
 
 def sha(raw: bytes) -> str:
@@ -286,10 +293,9 @@ def prepare(*, output_root: Path, **evidence_paths: Path) -> tuple[dict, str]:
     return plan, plan_sha
 
 
-def verify_authorization(path: Path, plan: dict, plan_sha: str,
-                         *, trusted_uid: int = 0, trusted_root: Path = Path("/")) -> dict:
-    # The owner reply is authenticated out of band by the trusted administrator.
-    # This root-owned exact-bound record is the narrow publication capability.
+def protected_record(path: Path, *, trusted_uid: int = 0,
+                     trusted_root: Path = Path("/")) -> tuple[dict, str]:
+    """A record only the trusted administrator could have written."""
     require(path.is_absolute() and trusted_root.is_absolute() and
             (path == trusted_root or trusted_root in path.parents),
             "owner_authorization", "Authorization is outside the trusted root")
@@ -306,7 +312,14 @@ def verify_authorization(path: Path, plan: dict, plan_sha: str,
         if current == trusted_root:
             break
         current = current.parent
-    authorization, _ = read_json(path)
+    return read_json(path)
+
+
+def verify_authorization(path: Path, plan: dict, plan_sha: str,
+                         *, trusted_uid: int = 0, trusted_root: Path = Path("/")) -> dict:
+    # The owner reply is authenticated out of band by the trusted administrator.
+    # This root-owned exact-bound record is the narrow publication capability.
+    authorization, _ = protected_record(path, trusted_uid=trusted_uid, trusted_root=trusted_root)
     require(set(authorization) == {"schema", "decision", "project", "task_id", "destination",
                                    "base_branch", "publication_branch", "final_revision",
                                    "publication_plan_sha256", "owner_event_id", "purpose"} and
@@ -349,7 +362,8 @@ class GitHub:
         except error.HTTPError as exc:
             if missing_ok and exc.code == 404:
                 return None
-            raise PublicationError("github", f"GitHub {method} request failed: HTTP {exc.code}") from exc
+            raise PublicationError("github", f"GitHub {method} request failed: HTTP {exc.code}",
+                                   exc.code) from exc
         except (OSError, ValueError) as exc:
             raise PublicationError("github", f"GitHub {method} request failed: {type(exc).__name__}") from exc
 
@@ -367,6 +381,33 @@ class GitHub:
 
     def create_draft(self, destination: str, payload: dict):
         require(payload.get("draft") is True, "draft", "Only draft PR creation is permitted")
+        return self.api("POST", f"/repos/{destination}/pulls", payload)
+
+    def pull(self, destination: str, number: int):
+        return self.api("GET", f"/repos/{destination}/pulls/{number}")
+
+    def commit(self, destination: str, sha_: str):
+        return self.api("GET", f"/repos/{destination}/git/commits/{sha_}")
+
+    def mark_ready(self, node_id: str) -> None:
+        # REST has no ready-for-review endpoint; this GraphQL mutation is the only one.
+        answer = self.api("POST", "/graphql", {
+            "query": "mutation($id: ID!) { markPullRequestReadyForReview(input: "
+                     "{pullRequestId: $id}) { pullRequest { isDraft } } }",
+            "variables": {"id": node_id}})
+        ready = ((answer or {}).get("data") or {}).get("markPullRequestReadyForReview") or {}
+        require(not (answer or {}).get("errors") and
+                (ready.get("pullRequest") or {}).get("isDraft") is False,
+                "github", "GitHub did not mark the pull request ready", 422)
+
+    def squash(self, destination: str, number: int, payload: dict):
+        require(payload.get("merge_method") == "squash" and HEX40.fullmatch(payload.get("sha") or ""),
+                "merge", "Only a squash merge pinned to one head commit is permitted")
+        return self.api("PUT", f"/repos/{destination}/pulls/{number}/merge", payload)
+
+    def create_revert_pr(self, destination: str, payload: dict):
+        require(payload.get("draft") is False and "-undo-" in payload.get("head", ""),
+                "revert", "Only the owner's undo pull request is created ready")
         return self.api("POST", f"/repos/{destination}/pulls", payload)
 
 
@@ -485,7 +526,8 @@ def publish(*, output_root: Path, authorization_path: Path, token_file: Path,
                         f"QA report SHA-256: `{plan['qa_report_sha256']}`\n"
                         f"Reviewer report SHA-256: `{plan['review_report_sha256']}`\n"
                         f"Publication plan SHA-256: `{plan_sha}`\n\n"
-                        "Draft for owner review. No merge or deployment is authorized.\n")
+                        "Merged only by the owner, or by Alfred under the owner's own merge "
+                        "policy after QA and review. Alfred deploys nothing.\n")
                 created = service.create_draft(plan["destination"],
                     {"title": f"{plan['task_id']}: approved development change",
                      "head": plan["publication_branch"], "base": plan["base_branch"],
@@ -500,6 +542,321 @@ def publish(*, output_root: Path, authorization_path: Path, token_file: Path,
             stream.write(raw)
         os.replace(temporary, final)
         return result
+
+
+# --- handoff.31: one squash merge, and the owner's "undo" -----------------------------
+
+BINDING = ("project", "task_id", "destination", "base_branch", "publication_branch",
+           "final_revision")
+MERGE_AUTHORIZATION = "alfred.github-merge-authorization/1"
+REVERT_AUTHORIZATION = "alfred.github-revert-authorization/1"
+# GitHub answered and refused: nothing was merged. Any other failure is uncertain.
+REFUSED = {403, 404, 405, 409, 422}
+PUBLISHER_IDENTITY = {"GIT_AUTHOR_NAME": "Alfred Publisher", "GIT_COMMITTER_NAME": "Alfred Publisher",
+                      "GIT_AUTHOR_EMAIL": "alfred-publisher@users.noreply.github.com",
+                      "GIT_COMMITTER_EMAIL": "alfred-publisher@users.noreply.github.com"}
+
+
+def _write_result(target: Path, name: str, value: dict) -> dict:
+    temporary = target / (name + ".tmp")
+    with temporary.open("wb") as stream:
+        stream.write(canonical(value))
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, target / name)
+    return value
+
+
+def _task_directory(output_root: Path, record: dict) -> Path:
+    require(type(record.get("project")) is str and IDENT.fullmatch(record["project"]) is not None and
+            type(record.get("task_id")) is str and TASK.fullmatch(record["task_id"]) is not None,
+            "identity", "Invalid project or task in authorization")
+    return output_root / record["project"] / record["task_id"]
+
+
+def _pr_number(url: object, destination: str) -> int:
+    match = re.fullmatch(r"https://github\.com/" + re.escape(destination) + r"/pull/([1-9][0-9]{0,9})",
+                         url if type(url) is str else "")
+    require(match is not None, "identity", "Pull request URL mismatch")
+    return int(match[1])
+
+
+def _same_pr(pr: object, number: object, url: str, head: str, branch: str, base: str,
+             destination: str) -> dict:
+    require(type(pr) is dict and type(number) is int and pr.get("number") == number and
+            pr.get("html_url") == url and
+            type(pr.get("head")) is dict and pr["head"].get("sha") == head and
+            pr["head"].get("ref") == branch and
+            (pr["head"].get("repo") or {}).get("full_name") == destination and
+            type(pr.get("base")) is dict and pr["base"].get("ref") == base and
+            (pr["base"].get("repo") or {}).get("full_name") == destination,
+            "github", "GitHub pull request is not this task's pull request")
+    return pr
+
+
+def _merged_commit(service, destination: str, pr: dict, head: str,
+                   main_before: str) -> tuple[str, str, str]:
+    """GitHub's readback of one squash merge: (commit, its single parent, merged_at).
+
+    When nothing else landed on main first, the squash commit must have exactly the
+    files of the commit that was checked.
+    """
+    commit = pr.get("merge_commit_sha") or ""
+    require(pr.get("merged") is True and pr.get("state") == "closed" and
+            HEX40.fullmatch(commit) is not None and type(pr.get("merged_at")) is str,
+            "readback", "GitHub does not record the merge")
+    record = service.commit(destination, commit)
+    parents = record.get("parents") if type(record) is dict else None
+    require(type(parents) is list and len(parents) == 1 and type(parents[0]) is dict and
+            HEX40.fullmatch(parents[0].get("sha") or "") is not None,
+            "readback", "The merge is not a single squash commit")
+    if parents[0]["sha"] == main_before:
+        checked = service.commit(destination, head)
+        require(type(checked) is dict and
+                (record.get("tree") or {}).get("sha") == (checked.get("tree") or {}).get("sha"),
+                "readback", "The squash commit's files differ from the checked commit")
+    return commit, parents[0]["sha"], pr["merged_at"]
+
+
+def merge_record(auth: dict, auth_sha: str, status: str, *, reason: str | None = None,
+                 detail: str | None = None, commit: str | None = None,
+                 parent: str | None = None, merged_at: str | None = None) -> dict:
+    return {"schema": "alfred.merge-result/1", **{k: auth[k] for k in BINDING},
+            "baseline_revision": auth["baseline_revision"], "draft_pr_url": auth["draft_pr_url"],
+            "publication_plan_sha256": auth["publication_plan_sha256"],
+            "merge_authorization_sha256": auth_sha, "merge_method": "squash",
+            "status": status, "reason": reason, "detail": detail,
+            "merge_commit": commit, "merge_parent": parent, "merged_at": merged_at,
+            "commit_url": (f"https://github.com/{auth['destination']}/commit/{commit}"
+                           if commit else None)}
+
+
+def merge(*, output_root: Path, authorization_path: Path, token_file: Path,
+          github: GitHub | None = None, trusted_uid: int = 0,
+          trusted_root: Path = Path("/")) -> dict:
+    """Mark this task's own draft PR ready and squash-merge it, once.
+
+    Only under a root-owned record of the owner's delegated merge policy, bound to the
+    exact publication plan, draft PR and approved commit. main must still be the commit
+    QA and the Reviewer checked; otherwise nothing is merged and the owner is told.
+    """
+    auth, auth_sha = protected_record(authorization_path, trusted_uid=trusted_uid,
+                                      trusted_root=trusted_root)
+    require(set(auth) == {"schema", "decision", "purpose", *BINDING, "baseline_revision",
+                          "publication_plan_sha256", "draft_pr_url", "merge_method",
+                          "owner_event_id", "policy_sha256"} and
+            auth["schema"] == MERGE_AUTHORIZATION and auth["decision"] == "approved" and
+            auth["purpose"] == "one_squash_merge" and auth["merge_method"] == "squash" and
+            type(auth["owner_event_id"]) is str and bool(auth["owner_event_id"]),
+            "merge_authorization", "Merge authorization is missing or malformed")
+    target = _task_directory(output_root, auth)
+    with (target / ".lock").open("a+b") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        plan, plan_sha = read_json(target / "publication-plan.json")
+        published, _ = read_json(target / "publication-result.json")
+        require(plan_sha == auth["publication_plan_sha256"] and
+                all(plan.get(k) == auth[k] for k in (*BINDING, "baseline_revision")) and
+                published.get("status") == "PUBLISHED_DRAFT" and
+                published.get("publication_plan_sha256") == plan_sha and
+                published.get("draft_pr_url") == auth["draft_pr_url"],
+                "merge_authorization", "Merge authorization is not bound to this draft PR")
+        final = target / "merge-result.json"
+        if final.exists():
+            previous, _ = read_json(final)
+            require(previous.get("merge_authorization_sha256") == auth_sha, "duplicate",
+                    "Existing merge result belongs to another authorization")
+            return previous
+        destination, number = auth["destination"], _pr_number(auth["draft_pr_url"], auth["destination"])
+        service = github if github is not None else GitHub(token_file)
+        pr = _same_pr(service.pull(destination, number), number, auth["draft_pr_url"],
+                      auth["final_revision"], auth["publication_branch"], auth["base_branch"],
+                      destination)
+        if pr.get("merged") is not True:
+            require(pr.get("state") == "open", "github", "The draft PR is not open")
+            base = service.ref(destination, auth["base_branch"])
+            if (base or {}).get("object", {}).get("sha") != auth["baseline_revision"]:
+                return _write_result(target, "merge-result.json", merge_record(
+                    auth, auth_sha, "NOT_MERGED", reason="main_moved",
+                    detail="main changed after QA and the Reviewer checked this change"))
+            try:
+                if pr.get("draft") is not False:
+                    service.mark_ready(pr.get("node_id"))
+                service.squash(destination, number, {
+                    "merge_method": "squash", "sha": auth["final_revision"],
+                    "commit_title": f"{auth['task_id']}: approved development change (#{number})",
+                    "commit_message": "Squash-merged by Alfred after Independent QA and the "
+                                      "independent Reviewer passed it.\n"
+                                      f"Publication plan SHA-256: {plan_sha}\n"})
+            except PublicationError as exc:
+                if exc.status not in REFUSED:
+                    raise  # No answer from GitHub: the outcome is uncertain, never assumed.
+                return _write_result(target, "merge-result.json", merge_record(
+                    auth, auth_sha, "NOT_MERGED", reason="github_refused",
+                    detail=f"{exc.requirement}: {exc.detail}"))
+            pr = _same_pr(service.pull(destination, number), number, auth["draft_pr_url"],
+                          auth["final_revision"], auth["publication_branch"],
+                          auth["base_branch"], destination)
+        commit, parent, merged_at = _merged_commit(service, destination, pr, auth["final_revision"],
+                                                   auth["baseline_revision"])
+        return _write_result(target, "merge-result.json", merge_record(
+            auth, auth_sha, "MERGED", commit=commit, parent=parent, merged_at=merged_at))
+
+
+def _git_env(token_file: Path) -> dict:
+    return {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": str(Path(__file__).with_name("askpass.py")),
+            "ALFRED_PUBLISH_TOKEN_FILE": str(token_file), **PUBLISHER_IDENTITY}
+
+
+def _run(command: list[str], env: dict, *, ok=(0,)) -> subprocess.CompletedProcess:
+    try:
+        result = subprocess.run(command, capture_output=True, stdin=subprocess.DEVNULL,
+                                timeout=60, env=env)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise PublicationError("revert", f"Isolated Git operation failed: {type(exc).__name__}") from exc
+    require(result.returncode in ok, "revert", "Isolated Git operation failed")
+    return result
+
+
+def revert_record(auth: dict, auth_sha: str, status: str, *, reason: str | None = None,
+                  detail: str | None = None, commit: str | None = None,
+                  url: str | None = None) -> dict:
+    return {"schema": "alfred.revert-result/1",
+            **{k: auth[k] for k in ("project", "task_id", "destination", "base_branch",
+                                    "merge_commit", "merge_parent", "draft_pr_url")},
+            "revert_authorization_sha256": auth_sha, "owner_event_id": auth["owner_event_id"],
+            "status": status, "reason": reason, "detail": detail,
+            "revert_commit": commit, "revert_pr_url": url,
+            "commit_url": (f"https://github.com/{auth['destination']}/commit/{commit}"
+                           if commit else None)}
+
+
+def revert(*, output_root: Path, authorization_path: Path, token_file: Path,
+           github: GitHub | None = None, trusted_uid: int = 0, trusted_root: Path = Path("/"),
+           _fixture_remote: str | None = None) -> dict:
+    """Undo exactly this task's squash commit on main, once, after the owner's "undo".
+
+    The revert is computed against main as it is now. If main changed since in a way
+    that clashes with taking the commit back, nothing is changed and the owner is told.
+    The revert touches only files the squash commit changed, goes through its own pull
+    request and is squash-merged pinned to the exact revert commit.
+    """
+    auth, auth_sha = protected_record(authorization_path, trusted_uid=trusted_uid,
+                                      trusted_root=trusted_root)
+    require(set(auth) == {"schema", "decision", "purpose", "project", "task_id", "destination",
+                          "base_branch", "draft_pr_url", "final_revision", "merge_commit",
+                          "merge_parent", "publication_plan_sha256", "owner_event_id",
+                          "accepted_at"} and
+            auth["schema"] == REVERT_AUTHORIZATION and auth["decision"] == "approved" and
+            auth["purpose"] == "revert_one_squash_merge" and
+            type(auth["owner_event_id"]) is str and bool(auth["owner_event_id"]) and
+            type(auth["accepted_at"]) in (int, float) and
+            all(type(auth[k]) is str and HEX40.fullmatch(auth[k]) for k in ("merge_commit", "merge_parent")),
+            "revert_authorization", "Undo authorization is missing or malformed")
+    target = _task_directory(output_root, auth)
+    with (target / ".lock").open("a+b") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        merged, _ = read_json(target / "merge-result.json")
+        require(merged.get("status") == "MERGED" and
+                all(merged.get(k) == auth[k] for k in (
+                    "project", "task_id", "destination", "base_branch", "draft_pr_url",
+                    "final_revision", "merge_commit", "merge_parent", "publication_plan_sha256")),
+                "revert_authorization", "Undo authorization is not bound to this task's merge")
+        final = target / "revert-result.json"
+        if final.exists():
+            previous, _ = read_json(final)
+            require(previous.get("revert_authorization_sha256") == auth_sha, "duplicate",
+                    "Existing undo result belongs to another authorization")
+            return previous
+        destination, base, squash = auth["destination"], auth["base_branch"], auth["merge_commit"]
+
+        def refused(reason: str, detail: str) -> dict:
+            return _write_result(target, "revert-result.json",
+                                 revert_record(auth, auth_sha, "NOT_REVERTED", reason=reason,
+                                               detail=detail))
+
+        service = github if github is not None else GitHub(token_file)
+        head = (service.ref(destination, base) or {}).get("object", {}).get("sha") or ""
+        require(HEX40.fullmatch(head) is not None, "github", "Registered base branch unavailable")
+        branch = f"alfred/{auth['project']}/{auth['task_id']}-undo-{squash[:12]}"
+        remote = _fixture_remote or f"https://github.com/{destination}.git"
+        env = _git_env(token_file)
+        # Fixed dates: the same main always gives the same revert commit, so a second
+        # run finds its own branch instead of pushing a different one.
+        stamp = f"@{int(auth['accepted_at'])} +0000"
+        env.update(GIT_AUTHOR_DATE=stamp, GIT_COMMITTER_DATE=stamp)
+        with tempfile.TemporaryDirectory(prefix="alfred-revert-") as name:
+            temp = Path(name)
+
+            def git_(*args: str, ok=(0,)) -> subprocess.CompletedProcess:
+                return _run(["/usr/bin/git", "-C", str(temp), *args], env, ok=ok)
+
+            def text(*args: str) -> str:
+                return git_(*args).stdout.decode().strip()
+
+            def paths(*args: str) -> set[str]:
+                return set(git_(*args).stdout.decode().split("\0")) - {""}
+
+            _run(["/usr/bin/git", "init", "--bare", "-q", str(temp)], env)
+            git_("fetch", "--no-tags", "-q", remote, f"refs/heads/{base}:refs/alfred/base")
+            require(text("rev-parse", "refs/alfred/base") == head, "revert",
+                    "main moved while preparing the undo")
+            if git_("merge-base", "--is-ancestor", squash, head, ok=(0, 1)).returncode:
+                return refused("not_on_main", "the merged change is no longer on main")
+            require(text("rev-list", "--parents", "-n", "1", squash).split() ==
+                    [squash, auth["merge_parent"]], "revert",
+                    "The merged change is not the recorded single squash commit")
+            changed = paths("diff", "--name-only", "--no-renames", "-z", auth["merge_parent"], squash)
+            if head == squash:
+                tree = text("rev-parse", f"{auth['merge_parent']}^{{tree}}")
+            else:
+                # Take the squash commit back on top of today's main: a three-way merge
+                # of main and the commit's parent, based on the commit itself.
+                answer = git_("merge-tree", "--write-tree", f"--merge-base={squash}", head,
+                              auth["merge_parent"], ok=(0, 1))
+                if answer.returncode == 1:
+                    return refused("conflict", "main changed since in a way that clashes with the undo")
+                tree = answer.stdout.decode().splitlines()[0].strip()
+            if tree == text("rev-parse", f"{head}^{{tree}}"):
+                return refused("already_undone", "main already has none of the change")
+            require(paths("diff", "--name-only", "--no-renames", "-z", head, tree) <= changed,
+                    "revert", "The undo would touch files the merged change did not")
+            message = (f"Undo {auth['task_id']}: revert {squash[:12]}\n\n"
+                       f"This reverts commit {squash} at the owner's request "
+                       f"(reply \"undo\", event {auth['owner_event_id']}).\n")
+            commit = text("commit-tree", tree, "-p", head, "-m", message)
+            existing = service.ref(destination, branch)
+            if existing is None:
+                git_("push", "--porcelain", remote, f"{commit}:refs/heads/{branch}")
+            else:
+                require((existing.get("object") or {}).get("sha") == commit, "duplicate",
+                        "Undo branch exists at a different commit")
+        owner = destination.split("/", 1)[0]
+        prs = service.prs(destination, owner, branch, base)
+        require(type(prs) is list and len(prs) <= 1, "duplicate", "Ambiguous undo pull requests")
+        try:
+            pr = prs[0] if prs else service.create_revert_pr(destination, {
+                "title": f"Undo {auth['task_id']}", "head": branch, "base": base, "draft": False,
+                "maintainer_can_modify": False,
+                "body": (f"The owner replied \"undo\" to Alfred's completion text. This reverts "
+                         f"exactly {squash} (from {auth['draft_pr_url']}) and nothing else.\n")})
+            number = pr.get("number") if type(pr) is dict else None
+            url = f"https://github.com/{destination}/pull/{number}"
+            _same_pr(pr, number, url, commit, branch, base, destination)
+            if pr.get("merged") is not True:
+                service.squash(destination, number, {
+                    "merge_method": "squash", "sha": commit,
+                    "commit_title": f"Undo {auth['task_id']} (#{number})",
+                    "commit_message": f"Reverts {squash} at the owner's request.\n"})
+        except PublicationError as exc:
+            if exc.status not in REFUSED:
+                raise
+            return refused("github_refused", f"{exc.requirement}: {exc.detail}")
+        pr = _same_pr(service.pull(destination, number), number, url, commit, branch, base,
+                      destination)
+        undone, _, _ = _merged_commit(service, destination, pr, commit, head)
+        return _write_result(target, "revert-result.json",
+                             revert_record(auth, auth_sha, "REVERTED", commit=undone, url=url))
 
 
 def main(argv: list[str] | None = None) -> int:

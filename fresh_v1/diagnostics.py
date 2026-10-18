@@ -6,7 +6,8 @@ import subprocess
 from .handoffs import Held
 
 SCHEMA = "alfred.fresh-v1-worker-failure/1"
-STAGES = {"plan", "developer", "qa", "reviewer", "prepare", "publish", "completion"}
+STAGES = {"plan", "developer", "qa", "reviewer", "prepare", "publish", "completion",
+          "merge", "revert"}
 PHASES = {
     "worker_startup",
     "worker_output",

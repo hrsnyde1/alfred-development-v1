@@ -27,6 +27,7 @@ def prepare(
     get_pr,
     owner_login: str,
     owner_merge_attested: bool = False,
+    merge: dict | None = None,
 ) -> CompletionNotification:
     """Inputs must come from the pinned protected handoff, never a requester outbox."""
     validate(result, result_schema)
@@ -104,6 +105,12 @@ def prepare(
     ):
         raise ValueError("GitHub publication readback mismatch")
     summary = f"Alfred successfully created Draft PR #{number}."
+    if merge is not None:
+        # handoff.31: the pipeline merged it (or could not), under the owner's policy.
+        text = _merge_text(merge, pr, result, binding, plan_digest)
+        return CompletionNotification(
+            result["project"], result["task_id"], result["draft_pr_url"],
+            result["commit"], summary, text)
     if pr["merged"]:
         actor = (
             pr["merged_by"].get("login") if type(pr.get("merged_by")) is dict else None
@@ -158,4 +165,50 @@ def prepare(
         result["commit"],
         summary,
         text,
+    )
+
+
+MERGE_REASONS = {
+    "main_moved": "main changed while it was being tested",
+    "github_refused": "GitHub didn't allow it (main may need your approval there)",
+}
+
+
+def _merge_text(merge: dict, pr: dict, result: dict, binding: dict, plan_digest: str) -> str:
+    """The owner's text after the pipeline's own squash merge, checked against GitHub."""
+    if (
+        type(merge) is not dict
+        or merge.get("schema") != "alfred.merge-result/1"
+        or merge.get("merge_method") != "squash"
+        or any(merge.get(k) != binding[k] for k in binding)
+        or merge.get("draft_pr_url") != result["draft_pr_url"]
+        or merge.get("publication_plan_sha256") != plan_digest
+    ):
+        raise ValueError("merge record mismatch")
+    if merge.get("status") == "MERGED":
+        commit = merge.get("merge_commit") or ""
+        if (
+            re.fullmatch(r"[0-9a-f]{40}", commit) is None
+            or merge.get("commit_url")
+            != f"https://github.com/{binding['destination']}/commit/{commit}"
+            or pr["merged"] is not True
+            or pr["draft"]
+            or pr.get("state") != "closed"
+            or not pr.get("merged_at")
+            or pr.get("merge_commit_sha") != commit
+        ):
+            raise ValueError("inconsistent GitHub merge readback")
+        return (
+            f"All done with {result['project']}. It's built, tested, reviewed and merged "
+            f"into {binding['base_branch']}.\n{merge['commit_url']}\n"
+            "Reply undo within 24 hours to take it back."
+        )
+    if merge.get("status") != "NOT_MERGED" or merge.get("reason") not in MERGE_REASONS:
+        raise ValueError("merge record mismatch")
+    if pr["merged"] or pr.get("state") != "open":
+        raise ValueError("inconsistent GitHub merge readback")
+    return (
+        f"All done with {result['project']}. Built, tested and reviewed, but I couldn't "
+        f"merge it on my own: {MERGE_REASONS[merge['reason']]}. It's ready for you to merge."
+        f"\n{result['draft_pr_url']}"
     )

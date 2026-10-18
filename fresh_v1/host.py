@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 from .diagnostics import WorkerFailure, failure, worker_failure
-from .handoffs import Held, advance, write_once
+from .handoffs import Held, advance, undo, write_once
 from .protected import identity, protected_json
 
 POLICY = Path("/etc/alfred-fresh-v1/policy.json")
@@ -1035,6 +1035,165 @@ worker_main(sys.argv[1:])"""
             raise Held("publisher retry authorization invalid")
         return True
 
+    # --- handoff.31: automatic squash merge and the owner's "undo" -----------------
+
+    def merge_decision(self, job):
+        """The owner's merge policy for this draft PR, asked through the Intake. When
+        delegated, root seals the exact merge authorization for the Publisher."""
+        pub = self.jobdir(job) / "publication"
+        raw = (pub / "approved-plan.json").read_bytes()
+        response = self.intake(
+            {
+                "op": "stage_merge_authorization",
+                "plan_raw": raw.decode(),
+                "draft_pr_url": job["draft_pr_url"],
+            }
+        )
+        if response.get("state") == "merge_not_delegated":
+            return {"merge": "owner"}
+        record = response.get("authorization")
+        plan = json.loads(raw)
+        if (
+            response.get("state") != "merge_authorization_prepared"
+            or type(record) is not dict
+            or record.get("schema") != "alfred.github-merge-authorization/1"
+            or record.get("purpose") != "one_squash_merge"
+            or record.get("merge_method") != "squash"
+            or record.get("publication_plan_sha256") != hashlib.sha256(raw).hexdigest()
+            or record.get("draft_pr_url") != job["draft_pr_url"]
+            or any(
+                record.get(k) != plan[k]
+                for k in (
+                    "project",
+                    "task_id",
+                    "destination",
+                    "base_branch",
+                    "publication_branch",
+                    "final_revision",
+                    "baseline_revision",
+                )
+            )
+            or plan["destination"] != self.p["destination"]
+            or plan["base_branch"] != self.p["base_branch"]
+        ):
+            raise Held("merge authorization differs from sealed plan")
+        path = pub / "merge-authorization.json"
+        if path.exists():
+            if json.loads(path.read_bytes()) != record:
+                raise Held("merge authorization conflict")
+        else:
+            self.freeze_json(path, record, ("alfredpublish",))
+            self.share(pub, ("alfredpublish",))
+        return {
+            "merge": "delegated",
+            "authorization_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+
+    @predispatch("merge")
+    def merge(self, job):
+        return self.worker(job, "merge", "alfredpublish")
+
+    def merge_result(self, job):
+        """The Publisher's own merge record (it is also the merge stage's result)."""
+        raw = read_owned(
+            self.jobdir(job)
+            / "publisher-output"
+            / job["project"]
+            / job["task_id"]
+            / "merge-result.json",
+            self.uids["alfredpublish"],
+        )
+        recorded = json.loads((self.jobdir(job) / "merge.result.json").read_bytes())
+        if json.loads(raw) != recorded:
+            raise Held("merge record differs from the merge stage result")
+        return raw, recorded
+
+    def open_undo_window(self, job):
+        _, merged = self.merge_result(job)
+        return self.intake(
+            {
+                "op": "open_undo_window",
+                **{
+                    k: merged[k]
+                    for k in (
+                        "project",
+                        "task_id",
+                        "destination",
+                        "base_branch",
+                        "draft_pr_url",
+                        "final_revision",
+                        "merge_commit",
+                        "merge_parent",
+                        "publication_plan_sha256",
+                    )
+                },
+                "space_id": job["space_id"],
+                "completion_state": self.p["completion_state"],
+            }
+        )
+
+    def undo_authorization(self, job, reference):
+        """None until the owner's verified "undo" reply exists; then root seals the
+        exact revert authorization for the Publisher."""
+        if not (
+            Path(self.p["grant_root"]) / f"undo-decision-{reference}.json"
+        ).exists():
+            return None
+        result = self.intake(
+            {"op": "prepare_undo_authorization", "reference": reference}
+        )
+        record = result.get("authorization")
+        _, merged = self.merge_result(job)
+        if (
+            type(record) is not dict
+            or record.get("schema") != "alfred.github-revert-authorization/1"
+            or record.get("purpose") != "revert_one_squash_merge"
+            or not record.get("owner_event_id")
+            or merged.get("status") != "MERGED"
+            or any(
+                record.get(k) != merged[k]
+                for k in (
+                    "project",
+                    "task_id",
+                    "destination",
+                    "base_branch",
+                    "draft_pr_url",
+                    "final_revision",
+                    "merge_commit",
+                    "merge_parent",
+                    "publication_plan_sha256",
+                )
+            )
+        ):
+            raise Held("undo authorization differs from the recorded merge")
+        pub = self.jobdir(job) / "publication"
+        path = pub / "undo-authorization.json"
+        if path.exists():
+            if json.loads(path.read_bytes()) != record:
+                raise Held("undo authorization conflict")
+        else:
+            self.freeze_json(path, record, ("alfredpublish",))
+            self.share(pub, ("alfredpublish",))
+        return {"path": str(path)}
+
+    @predispatch("undo")
+    def undo(self, job):
+        return self.worker(job, "revert", "alfredpublish")
+
+    def undo_notice(self, job, result):
+        outcome = (
+            "undone" if result.get("status") == "REVERTED" else result.get("reason")
+        )
+        return self.intake(
+            {
+                "op": "notify_owner_undo",
+                "project": job["project"],
+                "space_id": job["space_id"],
+                "outcome": outcome,
+                "commit_url": result.get("commit_url") if outcome == "undone" else None,
+            }
+        )
+
     def completion_confirmed(self, job):
         """The owner's root-written `alfred-dev-ops confirm-delivered` record, as the
         task's completion, or None. The uncertain delivery record is not changed and
@@ -1103,6 +1262,11 @@ worker_main(sys.argv[1:])"""
             (root / "publication/authorization.json").read_bytes(),
         )
         plan = json.loads((base / "publication-plan.json").read_bytes())
+        # handoff.31: the Publisher's merge record, when it merged (or refused to).
+        merged = (root / "merge.result.json").exists()
+        if merged:
+            raw, _ = self.merge_result(job)
+            self.freeze(base / "merge-result.json", raw)
         cfg = {
             "schema": "alfred.completion-config/1",
             "enabled": True,
@@ -1130,6 +1294,7 @@ worker_main(sys.argv[1:])"""
                     "publication-plan",
                     "publication-result",
                     "owner-authorization",
+                    *(("merge-result",) if merged else ()),
                 )
             },
         }
@@ -1252,6 +1417,11 @@ def poll(policy_path=POLICY):
             else:
                 job, _ = protected_json(directory / "job.json")
             if (directory / "complete.json").exists():
+                # handoff.31: the owner may reply "undo" to a merged change's text.
+                undone = undo(directory, job, host)
+                if undone is not None and undone["state"] == "held":
+                    # Never retried on its own; it must not starve later requests.
+                    held = held or undone
                 continue
             confirmed = host.completion_confirmed(job)
             if confirmed:

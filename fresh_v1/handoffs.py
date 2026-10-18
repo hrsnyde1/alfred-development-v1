@@ -98,6 +98,19 @@ def once(directory, name, action):
     return result
 
 
+def recorded(directory, name, action):
+    """An idempotent step's answer, recorded once. Unlike once(), a step that never
+    answered is simply asked again: it only reads or writes its own idempotent record."""
+    finished = directory / (name + ".result.json")
+    if finished.exists():
+        return json.loads(finished.read_bytes())
+    result = action()
+    if type(result) is not dict:
+        raise Held(name + ": invalid stage result")
+    write_once(finished, result)
+    return result
+
+
 def reviewer_blocker(review) -> str | None:
     """Why a recorded Reviewer result may not advance to draft PR preparation, or None.
 
@@ -236,16 +249,60 @@ def advance(directory: Path, job: dict, io):
             raise Held(
                 "Publisher success is unverified; publication investigation required"
             )
+        # handoff.31: where the owner delegated merging, the Publisher squash-merges the
+        # draft PR once. The policy is asked once per task and the answer recorded.
+        job["draft_pr_url"] = result["draft_pr_url"]
+        merged = None
+        if recorded(directory, "merge-decision",
+                    lambda: io.merge_decision(job)).get("merge") == "delegated":
+            merged = once(directory, "merge", lambda: io.merge(job))
+            if merged.get("status") not in {"MERGED", "NOT_MERGED"}:
+                raise Held("merge outcome requires investigation")
         notice = once(directory, "completion", lambda: io.completion(job))
         if notice.get("status") not in {"sent", "already_sent"}:
             raise Held("completion delivery requires reconciliation")
-        return {
+        done = {
             "state": "complete",
             "draft_pr_url": result["draft_pr_url"],
             "notification": notice["status"],
         }
+        if merged and merged["status"] == "MERGED":
+            # The completion text says "Reply undo within 24 hours"; open that window.
+            window = recorded(directory, "undo-window", lambda: io.open_undo_window(job))
+            done.update(merge_commit=merged["merge_commit"], undo=window.get("state"))
+        return done
     except Exception as exc:  # noqa: BLE001 - durable fail-closed stage boundary
         # Preserve attempted operations. Do not expose model/credential exception text.
+        return {
+            "state": "held",
+            "reason": str(exc) if isinstance(exc, Held) else type(exc).__name__,
+        }
+
+
+def undo(directory: Path, job: dict, io):
+    """A completed, merged task: the owner's verified "undo" reverts exactly its squash
+    commit, once, and the owner gets one short text. None while there is nothing to do."""
+    window_path = directory / "undo-window.result.json"
+    if not window_path.exists() or (directory / "undone.json").exists():
+        return None
+    try:
+        window = json.loads(window_path.read_bytes())
+        if window.get("state") != "undo_window_open":
+            return None
+        if not started(directory, "undo"):
+            if io.undo_authorization(job, window["reference"]) is None:
+                return None
+        result = once(directory, "undo", lambda: io.undo(job))
+        if result.get("status") not in {"REVERTED", "NOT_REVERTED"}:
+            raise Held("undo outcome requires investigation")
+        notice = once(directory, "undo-notice", lambda: io.undo_notice(job, result))
+        if notice.get("state") != "sent":
+            raise Held("undo notice requires reconciliation")
+        outcome = {"state": "undone" if result["status"] == "REVERTED" else "undo_refused",
+                   "reason": result.get("reason"), "revert_commit": result.get("revert_commit")}
+        write_once(directory / "undone.json", outcome)
+        return outcome
+    except Exception as exc:  # noqa: BLE001 - durable fail-closed stage boundary
         return {
             "state": "held",
             "reason": str(exc) if isinstance(exc, Held) else type(exc).__name__,

@@ -10,7 +10,8 @@ import uuid
 from pathlib import Path
 
 from .owner_grants import (MAX_AGE, _bytes, _digest, _event_time, _read, _write_once,
-                           load_delegation_policy, publication_delegation_permits)
+                           load_delegation_policy, merge_delegation_permits,
+                           publication_delegation_permits)
 from .router import Denied
 
 PLAN_SHA = "511fa533fd9dc5bb41d51bff1baa21b28a54b8b0b670e5b3f0f602a78d38b903"
@@ -25,6 +26,7 @@ BOUND = {
 REF = re.compile(r"[0-9a-f]{32}\Z")
 DELEGATED = "alfred.publication-delegation/1"
 DELEGATED_DECISION = "alfred.publication-delegated-decision/1"
+MERGE_DELEGATED = "alfred.merge-delegated-decision/1"
 
 
 def _phrase(reference: str, bound: dict | None = None) -> str:
@@ -311,6 +313,56 @@ class PublicationApprovalIssuer:
                 "created_at": now, "challenge_sha256": _digest(receipt)})
             return {"state": "awaiting_native_publication_reply", "challenge": reference,
                     "message_id": message_id}
+
+    def merge_authorization(self, plan_raw: bytes, *, draft_pr_url: object,
+                            peer_uid: int) -> dict:
+        """The owner's merge policy for this exact published draft PR (handoff.31).
+
+        Delegated: one record, written once per plan, naming the policy in force; the
+        root-sealed authorization the Publisher needs to squash-merge it. Otherwise the
+        owner merges, exactly as before.
+        """
+        if peer_uid != self.admin_uid:
+            raise Denied("merge authorization requires administrator")
+        bound, plan_sha, _ = self._context(plan_raw)
+        plan = json.loads(plan_raw)
+        if (type(draft_pr_url) is not str or re.fullmatch(
+                r"https://github\.com/" + re.escape(bound["destination"]) + r"/pull/[1-9][0-9]{0,9}",
+                draft_pr_url) is None):
+            raise Denied("merge authorization needs the published draft PR")
+        name = f"merge-delegation-{plan_sha[:32]}.json"
+        with self._lock:
+            if (self.root / name).exists():
+                record = _read(self.root, name)
+            else:
+                # The draft PR itself must have been approved, by the owner or by delegation.
+                if not any(_read(self.root, f"publication-challenge-{p.stem.removeprefix('publication-decision-')}.json")
+                           .get("plan_sha256") == plan_sha
+                           for p in self.root.glob("publication-decision-*.json")):
+                    raise Denied("no publication decision for this plan")
+                policy = self._policy()
+                if not merge_delegation_permits(policy, bound["project"]):
+                    return {"state": "merge_not_delegated"}
+                record = {"schema": MERGE_DELEGATED, "reference": uuid.uuid4().hex,
+                          "plan_sha256": plan_sha, **bound, "draft_pr_url": draft_pr_url,
+                          "owner_id": self.owner, "policy": policy,
+                          "policy_sha256": _digest(policy),
+                          "decided_by": "owner_delegation_policy", "decided_at": self.clock()}
+                _write_once(self.root, name, record)
+            if (record.get("schema") != MERGE_DELEGATED or record.get("plan_sha256") != plan_sha
+                    or record.get("draft_pr_url") != draft_pr_url
+                    or any(record.get(k) != v for k, v in bound.items())
+                    or record.get("policy_sha256") != _digest(record.get("policy") or {})
+                    or not REF.fullmatch(record.get("reference") or "")):
+                raise Denied("merge delegation record mismatch")
+            return {"state": "merge_authorization_prepared", "authorization": {
+                "schema": "alfred.github-merge-authorization/1", "decision": "approved",
+                "purpose": "one_squash_merge", **bound,
+                "baseline_revision": plan["baseline_revision"],
+                "publication_plan_sha256": plan_sha, "draft_pr_url": draft_pr_url,
+                "merge_method": "squash",
+                "owner_event_id": f"delegated-merge-{record['reference']}",
+                "policy_sha256": record["policy_sha256"]}}
 
     def observe(self, event: object, *, peer_uid: int) -> dict:
         if peer_uid != self.sidecar_uid or type(event) is not dict:

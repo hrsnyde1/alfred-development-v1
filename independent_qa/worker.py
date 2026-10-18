@@ -232,6 +232,10 @@ def delegated_decision(grant_root: Path, ref: str, grant: dict, grant_sha: str,
             policy.get("schema") == "alfred.development-delegation-policy/1" and
             # "delegated": the owner's request "yes" also covers its draft PR (handoff.29).
             policy.get("publication_approval") in ("owner", "delegated") and
+            # "delegated": the pipeline also squash-merges after QA and review (handoff.31).
+            policy.get("merge_approval", "owner") in ("owner", "delegated") and
+            set(policy) - {"merge_approval"} == {"schema", "development_approval",
+                                                 "publication_approval"} and
             type(development) is dict and development.get("enabled") is True and
             type(development.get("projects")) is list and
             expected_request["project"] in development["projects"] and

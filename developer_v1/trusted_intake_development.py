@@ -39,6 +39,7 @@ from developer_v1.owner_grants import (
     _rename_noreplace,
 )
 from developer_v1.publication_approval import PublicationApprovalIssuer
+from developer_v1.undo_approval import UndoIssuer, notify_request, undo_text
 from developer_v1.router import ID, TASK, Denied
 
 MAX_PACKET = 64 * 1024
@@ -159,7 +160,7 @@ class IntakeGate:
                  intake_dir: Path, gateway_dir: Path, clock=time.monotonic,
                  preview_sender=None, development_issuer=None, development_inputs=None,
                  publication_issuer=None, registry_path: Path | None = None,
-                 request_route_root: Path | None = None) -> None:
+                 request_route_root: Path | None = None, undo_issuer=None) -> None:
         if not owner_sender_id or sidecar_uid == hermes_uid:
             raise ValueError("owner and distinct sidecar/Hermes identities are required")
         self.owner_sender_id = owner_sender_id
@@ -174,6 +175,8 @@ class IntakeGate:
         self.development_issuer = development_issuer
         self.development_inputs = development_inputs
         self.publication_issuer = publication_issuer
+        # handoff.31: the owner's "undo" reply to a merged change's completion text.
+        self.undo_issuer = undo_issuer
         self.registry_path = registry_path
         self.request_route_root = request_route_root
         self._lock = threading.Lock()
@@ -192,6 +195,13 @@ class IntakeGate:
         if op == "observe":
             if peer_uid != self.sidecar_uid:
                 raise IntakeRefused("wrong_peer")
+            if getattr(self, "undo_issuer", None) is not None:
+                try:
+                    result = self.undo_issuer.observe(request.get("event"), peer_uid=peer_uid)
+                except Denied as exc:
+                    raise IntakeRefused("undo_refused") from exc
+                if result["state"] != "not_undo":
+                    return result
             if getattr(self, "publication_issuer", None) is not None:
                 try:
                     result = self.publication_issuer.observe(request.get("event"), peer_uid=peer_uid)
@@ -231,6 +241,38 @@ class IntakeGate:
                             request.get("reference"), peer_uid=peer_uid)}
             except (Denied, OSError, ValueError) as exc:
                 raise IntakeRefused("publication_authorization_unavailable") from exc
+        if op == "stage_merge_authorization":
+            # handoff.31: the owner's merge policy for one published draft PR, root only.
+            if peer_uid != 0 or self.publication_issuer is None:
+                raise IntakeRefused("wrong_peer")
+            try:
+                raw = request.get("plan_raw")
+                if type(raw) is not str or len(raw) > 16384:
+                    raise Denied("invalid publication plan bytes")
+                return self.publication_issuer.merge_authorization(
+                    raw.encode("utf-8"), draft_pr_url=request.get("draft_pr_url"),
+                    peer_uid=peer_uid)
+            except (Denied, OSError, ValueError) as exc:
+                raise IntakeRefused("merge_authorization_unavailable") from exc
+        if op in {"open_undo_window", "prepare_undo_authorization", "notify_owner_undo"}:
+            if peer_uid != 0 or getattr(self, "undo_issuer", None) is None:
+                raise IntakeRefused("wrong_peer")
+            try:
+                if op == "open_undo_window":
+                    return self.undo_issuer.open(request, peer_uid=peer_uid)
+                if op == "prepare_undo_authorization":
+                    return {"state": "undo_authorization_prepared",
+                            "authorization": self.undo_issuer.prepare(
+                                request.get("reference"), peer_uid=peer_uid)}
+                space_id, outcome, url = notify_request(request)
+                project = request.get("project")
+                if type(project) is not str or self.preview_sender is None:
+                    raise Denied("invalid undo notice")
+                text = undo_text(outcome, self._display_name(project)
+                                 if self.registry_path else project, url)
+                return {"state": "sent", "message_id": self.preview_sender(space_id, text)}
+            except (Denied, OSError, ValueError, TimeoutError) as exc:
+                raise IntakeRefused("undo_unavailable") from exc
         if op == "notify_owner_stuck":
             # After the last automatic fix round: one plain-language text, root only.
             if peer_uid != 0 or self.preview_sender is None:
@@ -861,7 +903,11 @@ def main() -> None:
                       development_inputs=development_inputs,
                       publication_issuer=publication_issuer if development_issuer else None,
                       registry_path=Path(config["registry_path"]),
-                      request_route_root=Path(config["development_grant_root"]))
+                      request_route_root=Path(config["development_grant_root"]),
+                      undo_issuer=UndoIssuer(Path(config["development_grant_root"]),
+                                             owner_sender_id=config["owner_sender_id"],
+                                             sidecar_uid=config["sidecar_uid"])
+                      if development_issuer else None)
     if os.geteuid() in (gate.sidecar_uid, gate.hermes_uid):
         raise ValueError("gate identity must be distinct from both clients")
     serve(Path(config["socket_path"]), gate)
