@@ -42,6 +42,8 @@ def main(argv=None) -> None:
     parser.add_argument("--registry", type=Path, required=True)
     parser.add_argument("--grant-root", type=Path, required=True)
     parser.add_argument("--state-root", type=Path, required=True)
+    # Owner-approved Alfred OS team snapshots; default team_snapshot.ROOT.
+    parser.add_argument("--team-snapshots", type=Path, default=None)
     args = parser.parse_args(argv)
     # Fix rounds carry findings and the previous attempt's files (bounded by the host).
     request = _protected_json(args.request, 65536)
@@ -60,7 +62,7 @@ def main(argv=None) -> None:
         items=request["items"], models=models, state_root=args.state_root,
         total_cost_limit=request["total_cost_limit"],
         overrides=request.get("model_overrides"), baseline_revision=request.get("baseline_revision"),
-        fix_round=request.get("fix_round", 0))
+        fix_round=request.get("fix_round", 0), team_snapshot_root=args.team_snapshots)
     fix_round = request.get("fix_round", 0)
     output = (args.state_root / request["project"] / request["task_id"]
               / ("qa-input.json" if fix_round == 0 else f"qa-input-r{fix_round}.json"))

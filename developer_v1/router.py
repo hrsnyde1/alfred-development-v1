@@ -35,6 +35,9 @@ CAPABILITY_BY_ROLE = {
     "security": {"code"},
     "mobile": {"mobile"},
     "performance": {"code"},
+    "builder": {"code"},
+    "qa": {"code"},
+    "code_reviewer": {"code"},
 }
 ID = re.compile(r"[a-z][a-z0-9-]{1,31}\Z")
 TASK = re.compile(r"T-[0-9]{4}\Z")
@@ -235,6 +238,17 @@ ROUTES = (
 )
 
 
+# Consulted only when no specialist above matches, so every request that routed
+# before routes the same way; requests that used to need clarification can now go
+# to QA, the Code Reviewer or the general Builder.
+CORE_ROUTES = (
+    ("qa", ("test coverage", "regression test", "missing tests", "test suite", "flaky test")),
+    ("code_reviewer", ("code review", "review the code", "architecture review",
+                       "security review")),
+    ("builder", ("bug", "fix", "small feature", "gateway", "alfred")),
+)
+
+
 def select_specialists(spec: dict, plan: dict) -> list[str]:
     """Conservative, evidence-aware CTO routing proposal; grant must permit it."""
     sections = spec.get("sections") or {}
@@ -247,6 +261,8 @@ def select_specialists(spec: dict, plan: dict) -> list[str]:
     if type(files) is not list or any(type(f) is not str for f in files):
         raise Denied("invalid repository evidence")
     result = [role for role, terms in ROUTES if any(term in text for term in terms)]
+    if not result:
+        result = [role for role, terms in CORE_ROUTES if any(term in text for term in terms)][:1]
     if "ai_ml" in result and (
         "integration" in result or "research agent" in text or "research-agent" in text
     ):

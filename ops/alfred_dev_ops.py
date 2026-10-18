@@ -5,8 +5,11 @@
 Only these operations exist: status, pause, resume, install <N>, rollback <N>,
 resend <task> (one fresh publication approval text for an expired one) and abandon
 <project/task> (stop one task for good, by the owner's decision) and republish
-<project/task> (one more publish attempt after a definite Publisher error). There is
-no generic command, path or argument passthrough. `install` runs a fixed sequence on a
+<project/task> (one more publish attempt after a definite Publisher error) and
+claude-token (save the development agents' own long-lived Claude token) and
+confirm-delivered <project/task> (the owner received a completion text whose delivery
+record stayed uncertain; nothing is sent or resent). There is no generic command, path
+or argument passthrough. `install` runs a fixed sequence on a
 pinned handoff release, executing only code from inside the hash-verified archive, never
 from the alfred-writable checkout. The owner confirms each install by typing the start of
 the archive SHA-256 from Claude's report; the helper never displays it first. Every
@@ -17,10 +20,15 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import fcntl
+import getpass
+import grp
 import hashlib
 import json
 import os
+import pwd
 import re
+import stat
 import shutil
 import subprocess
 import sys
@@ -37,6 +45,9 @@ NAME = re.compile(r"alfred-fresh-v1-1\.0\.1-development-handoff\.[0-9]{1,3}\Z")
 RELEASE_KEYS = {"schema", "name", "archive_sha256", "manifest_sha256", "installer",
                 "installer_sha256", "installed_after", "preflight", "restart"}
 PYTHON = "/usr/bin/python3"
+# The development agents' own Claude token: root-owned, readable by the alfred group only.
+CLAUDE_TOKEN = Path("/etc/alfred-development/claude-agents.token")
+TOKEN = re.compile(r"[A-Za-z0-9_-]{20,400}\Z")
 
 
 class Refused(RuntimeError):
@@ -202,6 +213,28 @@ def abandon(name: str, now: float) -> dict:
     return {"task": name, "state": "abandoned", "next": "later requests run on the next poll"}
 
 
+def claude_token(token: str) -> dict:
+    """Save the agents' long-lived token from `claude setup-token`. It is never printed or
+    logged; only its fingerprint is."""
+    token = token.strip()
+    if not TOKEN.fullmatch(token):
+        raise Refused("that does not look like a Claude token; nothing was saved")
+    gid = grp.getgrnam("alfred").gr_gid
+    temporary = CLAUDE_TOKEN.with_name(CLAUDE_TOKEN.name + ".new")
+    temporary.unlink(missing_ok=True)
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        os.fchown(fd, 0, gid)
+        os.fchmod(fd, 0o640)
+        os.write(fd, (token + "\n").encode())
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(temporary, CLAUDE_TOKEN)
+    return {"claude_token": "saved", "fingerprint": hashlib.sha256(token.encode()).hexdigest()[:12],
+            "next": "agents use it from their next task"}
+
+
 MAX_PUBLISH_RETRIES = 3
 
 
@@ -235,6 +268,100 @@ def republish(name: str, now: float) -> dict:
     return {"task": name, "retry": n, "next": "the next poll publishes again"}
 
 
+DELIVERY = Path("/home/alfred/Alfred/completion-delivery")
+
+
+def delivery_uid() -> int:
+    return pwd.getpwnam("alfred").pw_uid
+
+
+def latest_publish(directory: Path) -> dict:
+    """The task's last recorded Publisher result (the original or the latest retry)."""
+    latest = directory / "publisher.result.json"
+    for n in range(1, MAX_PUBLISH_RETRIES + 1):
+        if (directory / f"publisher-retry-{n}.result.json").exists():
+            latest = directory / f"publisher-retry-{n}.result.json"
+    return json.loads(latest.read_bytes()) if latest.exists() else {}
+
+
+def tracked() -> bytes:
+    """delivery.json as it is now, read under the tracker's own lock so no send is in
+    flight. Opened read-only; the lock and state are never created or replaced."""
+    lock = os.open(DELIVERY / "delivery.lock", os.O_RDWR | os.O_NOFOLLOW)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fd = os.open(DELIVERY / "delivery.json", os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                    or info.st_uid != delivery_uid() or info.st_mode & 0o077):
+                raise Refused("completion delivery state is not protected; nothing was changed")
+            return stream.read(1048577)
+    except BlockingIOError:
+        raise Refused("a completion text is being sent right now; try again shortly") from None
+    finally:
+        os.close(lock)
+
+
+def confirm_delivered(name: str, now: float) -> dict:
+    """The owner received a completion text whose delivery record stayed `uncertain`
+    with no receipt: record that confirmation separately so the poll completes the
+    task. The uncertain record stays as it is (it is still the duplicate guard), the
+    attempt and failure evidence stay, and nothing is sent or resent."""
+    project, _, task = name.partition("/")
+    if not PROJECT.fullmatch(project) or not TASK.fullmatch(task):
+        raise Refused("name the task as project/task, for example demo-site/T-0003")
+    directory = JOBS / project / task
+    if not directory.is_dir() or directory.is_symlink():
+        raise Refused(f"{name} not found")
+    if (directory / "complete.json").exists():
+        raise Refused(f"{name} already completed")
+    if (directory / "completion-confirmed.json").exists():
+        raise Refused(f"{name}'s delivery is already confirmed")
+    if not (directory / "completion.attempt.json").exists():
+        raise Refused(f"{name} has not attempted its completion text")
+    if any(p.name != "completion.failure.json" for p in directory.glob("*.failure.json")):
+        raise Refused(f"{name} stopped before its completion text")
+    if (directory / "completion.result.json").exists() and json.loads(
+            (directory / "completion.result.json").read_bytes()).get("status") != "uncertain":
+        raise Refused(f"{name}'s completion did not end uncertain")
+    published = latest_publish(directory)
+    if published.get("status") != "PUBLISHED_DRAFT":
+        raise Refused(f"{name} has no published draft PR")
+    revision = json.loads(
+        (directory / "completion" / "config.json").read_bytes())["binding"]["final_revision"]
+    raw = tracked()
+    records = {
+        key: record for key, record in json.loads(raw)["records"].items()
+        if record["identity"][:2] == [project, task]
+    }
+    if len(records) != 1:
+        raise Refused(f"{name} has {len(records)} completion delivery records, not one")
+    (key, record), = records.items()
+    identity = record["identity"]
+    if record["state"] != "uncertain" or record.get("receipt_id") is not None:
+        raise Refused(f"{name}'s completion record is {record['state']}, not uncertain")
+    if (hashlib.sha256(json.dumps(identity, separators=(",", ":")).encode()).hexdigest() != key
+            or identity != [project, task, published.get("draft_pr_url"), revision]):
+        raise Refused(f"{name}'s completion record does not match its published draft PR")
+    snapshot = directory / "completion-confirmed.delivery.json"
+    fd = os.open(snapshot, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as stream:
+        stream.write(raw)
+    confirmation = {"schema": "alfred.completion-owner-confirmed/1", "project": project,
+                    "task_id": task, "record_key": key, "identity": identity,
+                    "text_digest": record["text_digest"], "transport_state": "uncertain",
+                    "receipt_id": None, "delivery_sha256": hashlib.sha256(raw).hexdigest(),
+                    "resend_permitted": False, "authorized_by": os.environ.get("SUDO_USER"),
+                    "confirmed_at": now}
+    fd = os.open(directory / "completion-confirmed.json",
+                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as stream:
+        stream.write(json.dumps(confirmation, indent=2, sort_keys=True) + "\n")
+    return {"task": name, "state": "owner-confirmed received", "transport_state": "uncertain",
+            "next": "the next poll marks it complete; nothing is sent"}
+
+
 def status() -> dict:
     handoffs = JOBS
     tasks = {}
@@ -259,6 +386,9 @@ def main() -> int:
     sub.add_parser("resend").add_argument("task")
     sub.add_parser("abandon").add_argument("task", help="project/task, e.g. demo-site/T-0002")
     sub.add_parser("republish").add_argument("task", help="project/task, e.g. demo-site/T-0003")
+    sub.add_parser("claude-token")
+    sub.add_parser("confirm-delivered").add_argument(
+        "task", help="project/task, e.g. demo-site/T-0003")
     args = parser.parse_args()
     if os.geteuid() != 0:
         print("Run with sudo.", file=sys.stderr)
@@ -283,6 +413,14 @@ def main() -> int:
             result = abandon(args.task, dt.datetime.now(dt.timezone.utc).timestamp())
         elif args.operation == "republish":
             result = republish(args.task, dt.datetime.now(dt.timezone.utc).timestamp())
+        elif args.operation == "claude-token":
+            result = claude_token(getpass.getpass(
+                "Paste the token from `claude setup-token` (input is hidden): "))
+        elif args.operation == "confirm-delivered":
+            if input(f"Type RECEIVED if you got the completion text for {args.task}: "
+                     ).strip() != "RECEIVED":
+                raise Refused("not confirmed")
+            result = confirm_delivered(args.task, dt.datetime.now(dt.timezone.utc).timestamp())
         else:
             result = rollback(args.handoff)
     except (Refused, subprocess.CalledProcessError, OSError, ValueError) as exc:

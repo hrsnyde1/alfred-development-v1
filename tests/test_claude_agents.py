@@ -1,7 +1,8 @@
 """handoff.21 (Phase 1): the development agents run on Claude with their own identity.
 
-No real model is called: a fake `claude` executable answers `auth status` and `-p`
-and records the arguments it was given."""
+No real model is called: a fake `claude` executable answers `-p` and records the
+arguments and environment it was given. handoff.26: the agents use their own token and
+a private home, never the owner's own Claude Code login."""
 
 import json
 import os
@@ -26,14 +27,16 @@ DEVELOPER_TOOLS = ("read_scoped", "write_scoped", "run_approved_check",
                    "git_local_commit_if_granted")
 
 
-def fake_claude(tmp_path, answer, *, logged_in=True, exit_code=0, stderr=""):
+TOKEN = "sk-ant-oat01-" + "x" * 40
+
+
+def fake_claude(tmp_path, answer, *, exit_code=0, stderr=""):
     log = tmp_path / "argv.json"
     cli = tmp_path / "claude"
     cli.write_text(
         "#!/usr/bin/python3\nimport json, os, sys\n"
-        "if sys.argv[1:3] == ['auth', 'status']:\n"
-        f"    print(json.dumps({{'loggedIn': {logged_in!r}}}))\n    sys.exit(0)\n"
-        f"json.dump({{'argv': sys.argv[1:], 'cwd': os.getcwd()}}, open({str(log)!r}, 'w'))\n"
+        f"json.dump({{'argv': sys.argv[1:], 'cwd': os.getcwd(), 'env': dict(os.environ)}},"
+        f" open({str(log)!r}, 'w'))\n"
         f"sys.stdout.write({json.dumps(answer)!r})\nsys.stderr.write({stderr!r})\n"
         f"sys.exit({exit_code})\n")
     cli.chmod(0o755)
@@ -45,11 +48,12 @@ def result(contract=EDITS, **extra):
             "structured_output": contract, **extra}
 
 
-def generate(tmp_path, answer, choice=SONNET, **kwargs):
+def generate(tmp_path, answer, choice=SONNET, token=TOKEN, **kwargs):
     cli, log = fake_claude(tmp_path, answer, **kwargs)
-    broker = ClaudeReadOnlyBroker(executable=str(cli))
-    contract = broker.generate(choice, objective="Add dark mode.", sources={"app.js": ""},
-                               identity="You are the Frontend Engineer.")
+    broker = ClaudeReadOnlyBroker(executable=str(cli), home=tmp_path / "agents")
+    with patch("developer_v1.real_worker._claude_token", return_value=token):
+        contract = broker.generate(choice, objective="Add dark mode.", sources={"app.js": ""},
+                                   identity="You are the Frontend Engineer.")
     return contract, json.loads(log.read_text())
 
 
@@ -72,14 +76,53 @@ def test_claude_returns_the_edit_contract_with_no_tools(tmp_path):
     assert not os.listdir(call["cwd"]) if os.path.exists(call["cwd"]) else True
 
 
+def test_claude_runs_with_the_agents_token_in_a_private_home(tmp_path):
+    _, call = generate(tmp_path, result())
+    env = call["env"]
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == TOKEN
+    assert env["HOME"] == str(tmp_path / "agents")
+    assert oct((tmp_path / "agents").stat().st_mode & 0o777) == "0o700"
+    assert set(env) <= {"HOME", "PATH", "CLAUDE_CODE_OAUTH_TOKEN", "DISABLE_AUTOUPDATER",
+                        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "PWD", "LC_CTYPE", "_"}
+
+
+def test_the_token_file_must_be_root_owned_and_private(tmp_path):
+    from developer_v1.real_worker import _claude_token
+
+    path = tmp_path / "token"
+    path.write_text(TOKEN + "\n")
+    path.chmod(0o640)
+    # Owned by the test user, not root: refused, so Claude counts as unavailable.
+    assert _claude_token(path) is None
+    assert _claude_token(tmp_path / "missing") is None
+    with patch("developer_v1.real_worker.os.fstat",
+               return_value=os.stat_result((0o100640, 0, 0, 1, 0, 0, len(TOKEN) + 1, 0, 0, 0))):
+        assert _claude_token(path) == TOKEN
+    with patch("developer_v1.real_worker.os.fstat",
+               return_value=os.stat_result((0o100644, 0, 0, 1, 0, 0, len(TOKEN) + 1, 0, 0, 0))):
+        assert _claude_token(path) is None  # world-readable
+
+
+def test_the_sandbox_no_longer_opens_the_owners_claude_login():
+    conf = (ROOT / "development_handoff26/60-claude-agents.conf").read_text()
+    assert [l for l in conf.splitlines() if l and not l.startswith("#")] == ["[Service]"]
+
+
 def test_every_catalog_effort_maps_to_one_claude_accepts():
     assert set(CLAUDE_EFFORT) == EFFORTS
     assert set(CLAUDE_EFFORT.values()) <= {"low", "medium", "high", "xhigh", "max"}
 
 
 @pytest.mark.parametrize("answer,kwargs", [
-    (result(), {"logged_in": False}),
+    (result(), {"token": None}),
     ({"type": "result", "is_error": True, "result": "API Error: rate limit"}, {"exit_code": 1}),
+    # T-0004: a token refresh that could not take its lock.
+    ({"type": "result", "subtype": "success", "is_error": True, "terminal_reason": "api_error",
+      "result": "Failed to refresh OAuth token: another Claude Code process is refreshing it"},
+     {"exit_code": 1}),
+    ({"type": "result", "subtype": "success", "is_error": True, "terminal_reason": "api_error",
+      "result": "Failed to authenticate. API Error: 401 OAuth access token is invalid."},
+     {"exit_code": 1}),
     ("", {"exit_code": 1, "stderr": "Error: usage limit reached"}),
 ])
 def test_an_unavailable_claude_route_allows_the_approved_fallback(tmp_path, answer, kwargs):
@@ -255,7 +298,10 @@ def test_each_role_runs_on_its_profile_model_with_a_codex_fallback(role):
 
 def test_the_new_catalog_keeps_every_existing_codex_model():
     live_shape = json.loads((ROOT / "developer_v1/models.codex-verified.example.json").read_text())
-    assert set(MODELS["specialists"]) == set(live_shape["specialists"])
+    # handoff.21's catalog predates builder, qa and code_reviewer; their slots come
+    # from the Alfred OS applier, and V1 fails closed before the grant without them.
+    assert set(live_shape["specialists"]) - set(MODELS["specialists"]) == {
+        "builder", "qa", "code_reviewer"}
     assert set(MODELS["providers"]) == {"claude", "codex"}
 
 
@@ -264,4 +310,6 @@ def test_the_pipeline_accepts_claude_and_codex_but_nothing_else():
     source = (ROOT / "developer_v1/pipeline.py").read_text()
     assert 'providers[first.provider][first.model]["max_task_cost"]' in source
     # Profiles are read before the grant is claimed, so a bad bundle leaves it unused.
-    assert source.index("agent_profiles.identity(s)") < source.index("authority.claim(")
+    assert source.index("agent_profiles.identity(") < source.index("authority.claim(")
+    # So are the owner-approved Alfred OS snapshots (team_snapshot.py).
+    assert source.index("team_snapshot.profile(") < source.index("authority.claim(")

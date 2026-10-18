@@ -171,7 +171,7 @@ class DeveloperV1Test(unittest.TestCase):
         }
 
     def test_all_specialists_registered_with_contract(self):
-        self.assertEqual(len(SPECIALISTS), 11)
+        self.assertEqual(len(SPECIALISTS), 14)
         for item in SPECIALISTS.values():
             for key in (
                 "name",

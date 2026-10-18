@@ -157,6 +157,10 @@
       "type": "string",
       "pattern": "^[0-9a-f]{40}$"
     },
+    "team_profile": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "team_skills": {
       "type": "object",
       "required": ["library_commit", "role", "skills"],

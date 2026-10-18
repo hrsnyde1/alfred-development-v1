@@ -43,7 +43,9 @@ POLICY = Path("/etc/alfred-fresh-v1/policy.json")
 SCHEMAS = ("alfred.fresh-v1-policy/1", "alfred.fresh-v1-policy/2")
 PROJECT_KEYS = ("allowed_scope", "base_branch", "destination", "repository", "specialists")
 # The specialists this pipeline can staff today. Each project allows a subset.
-SUPPORTED_SPECIALISTS = ("backend", "frontend")
+# builder, qa and code_reviewer own a whole task on their own; only frontend and
+# backend split one task's files between them.
+SUPPORTED_SPECIALISTS = ("backend", "frontend", "builder", "qa", "code_reviewer")
 PROJECT_ID = re.compile(r"[a-z][a-z0-9-]{1,31}\Z")
 SCOPE_PATH = re.compile(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*\Z")
 
@@ -97,6 +99,8 @@ def work_items(scope: list[str], specialists: list[str], objective: str) -> list
         raise ValueError("work cannot be staffed")
     if len(specialists) == 1:
         owned = {specialists[0]: list(scope)}
+    elif not set(specialists) <= {"frontend", "backend"}:
+        raise ValueError("work cannot be staffed")
     else:
         owned = {
             "frontend": [p for p in scope if p.lower().endswith(WEB_SUFFIXES)],
@@ -104,7 +108,8 @@ def work_items(scope: list[str], specialists: list[str], objective: str) -> list
         }
     if any(not owned[s] for s in specialists):
         raise ValueError("a staffed specialist has no approved files")
-    order = [s for s in ("backend", "frontend") if s in specialists]
+    order = ([s for s in ("backend", "frontend") if s in specialists]
+             if len(specialists) > 1 else list(specialists))
     return [{"id": f"{s}-main", "specialist": s, "files": owned[s],
              "depends_on": [f"{d}-main" for d in order[:order.index(s)]],
              "objective": objective} for s in order]
@@ -1030,6 +1035,52 @@ worker_main(sys.argv[1:])"""
             raise Held("publisher retry authorization invalid")
         return True
 
+    def completion_confirmed(self, job):
+        """The owner's root-written `alfred-dev-ops confirm-delivered` record, as the
+        task's completion, or None. The uncertain delivery record is not changed and
+        is still the duplicate guard: this never sends, resends or adopts a receipt."""
+        directory = self.jobdir(job)
+        path = directory / "completion-confirmed.json"
+        if not path.exists():
+            return None
+        record, _ = protected_json(path)
+        snapshot, digest = protected_json(directory / "completion-confirmed.delivery.json")
+        identity = record.get("identity")
+        if (
+            record != {
+                "schema": "alfred.completion-owner-confirmed/1",
+                "project": job["project"],
+                "task_id": job["task_id"],
+                "record_key": record.get("record_key"),
+                "identity": identity,
+                "text_digest": record.get("text_digest"),
+                "transport_state": "uncertain",
+                "receipt_id": None,
+                "delivery_sha256": digest,
+                "resend_permitted": False,
+                "authorized_by": record.get("authorized_by"),
+                "confirmed_at": record.get("confirmed_at"),
+            }
+            or type(identity) is not list
+            or len(identity) != 4
+            or identity[:2] != [job["project"], job["task_id"]]
+            or record["record_key"] != hashlib.sha256(
+                json.dumps(identity, separators=(",", ":")).encode()).hexdigest()
+            or snapshot.get("records", {}).get(record["record_key"]) != {
+                "identity": identity,
+                "text_digest": record["text_digest"],
+                "state": "uncertain",
+                "receipt_id": None,
+            }
+            or not (directory / "completion.attempt.json").exists()
+        ):
+            raise Held("completion delivery confirmation invalid")
+        return {
+            "state": "complete",
+            "draft_pr_url": identity[2],
+            "notification": "owner_confirmed_received",
+        }
+
     @predispatch("completion")
     def completion(self, job):
         root = self.jobdir(job)
@@ -1201,6 +1252,12 @@ def poll(policy_path=POLICY):
             else:
                 job, _ = protected_json(directory / "job.json")
             if (directory / "complete.json").exists():
+                continue
+            confirmed = host.completion_confirmed(job)
+            if confirmed:
+                # The owner received the completion text its record left uncertain
+                # (`alfred-dev-ops confirm-delivered`). Its evidence stays; nothing sends.
+                write_once(directory / "complete.json", confirmed)
                 continue
             if ((directory / "development-challenge.attempt.json").exists()
                     and not (directory / "development-challenge.result.json").exists()):
