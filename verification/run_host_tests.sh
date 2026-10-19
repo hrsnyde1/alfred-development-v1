@@ -190,6 +190,11 @@ run handoff36 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_claude_ag
 run handoff37 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_staffing.py tests/test_fresh_v1.py \
   tests/test_development_handoff37_upgrade.py --junitxml="$OUT/handoff37.xml"
 
+# handoff.38: a refused plan step texts the owner once, with a fixed reason.
+run handoff38 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_plan_refusal_notice.py \
+  tests/test_fix_loop.py tests/test_fresh_v1.py tests/test_development_handoff38_upgrade.py \
+  --junitxml="$OUT/handoff38.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"

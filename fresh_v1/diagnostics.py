@@ -19,6 +19,17 @@ PHASES = {
     "git_ref_verify",
     "git_tree",
     "git_blob",
+    "plan_refusal",
+}
+# handoff.38: the plan step's own refusals, by the exact message prepare_plan raises.
+# Only the fixed category below is ever kept; the message is compared, never stored.
+PLAN_REFUSALS = {
+    ("scope or specialist requires clarification",): "clarification_required",
+    ("project outside activated low-risk policy",): "project_outside_policy",
+    ("registered main unavailable",): "registered_main_unavailable",
+    ("main moved during planning",): "main_moved",
+    ("unsupported planning tree",): "planning_tree_unavailable",
+    ("planning tree too large",): "planning_tree_unavailable",
 }
 CATEGORIES = {
     "permission_denied",
@@ -32,6 +43,7 @@ CATEGORIES = {
     "process_failed",
     "python_failed",
     "invalid_worker_result",
+    *PLAN_REFUSALS.values(),
 }
 
 
@@ -46,7 +58,16 @@ class WorkerFailure(Held):
 def failure(stage, phase, exc):
     category = "python_failed"
     rc = None
-    if isinstance(exc, subprocess.TimeoutExpired):
+    if (
+        stage == "plan"
+        and phase == "python"
+        and type(exc) is ValueError
+        and len(exc.args) == 1
+        and type(exc.args[0]) is str
+        and exc.args in PLAN_REFUSALS
+    ):
+        phase, category = "plan_refusal", PLAN_REFUSALS[exc.args]
+    elif isinstance(exc, subprocess.TimeoutExpired):
         category = "timeout"
     elif isinstance(exc, subprocess.CalledProcessError):
         rc = exc.returncode
@@ -107,6 +128,9 @@ def worker_failure(stage, exc):
                 and row["stage"] == stage
                 and row["phase"] in PHASES
                 and row["category"] in CATEGORIES
+                and (row["phase"] == "plan_refusal")
+                == (row["category"] in PLAN_REFUSALS.values())
+                and (row["phase"] != "plan_refusal" or stage == "plan")
                 and all(
                     v is None or (type(v) is int and -255 <= v <= 255)
                     for v in (row["operation_returncode"], row["errno"])
