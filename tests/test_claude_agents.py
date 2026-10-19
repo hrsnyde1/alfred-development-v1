@@ -238,7 +238,8 @@ def test_the_release_carries_all_thirteen_reviewed_profiles():
     assert set(bundle["squads"]) == {"core", "web", "ai", "infra", "security"}
     for agent in AGENTS:
         text = agent_profiles.identity(agent)
-        assert text.startswith("# ") and len(text.encode()) <= agent_profiles.MAX_PROFILE
+        assert text.startswith("# ") and len(text.encode()) <= (agent_profiles.MAX_PROFILE
+                                                                + agent_profiles.MAX_CHARTER + 2)
         assert agent_profiles.card(agent)["id"] == agent
 
 
@@ -266,6 +267,56 @@ def test_the_bundle_matches_its_source_files(tmp_path):
             (agents / agent / name).write_text(part if part.startswith("# ") else "# " + part)
     (agents / "squads.json").write_text(json.dumps({"squads": bundle["squads"]}))
     assert agent_profiles.build(agents, bundle["source"]["commit"]) == bundle
+
+
+def _profiles(tmp_path, charter=None):
+    agents = tmp_path / "agents"
+    (agents / "devops").mkdir(parents=True)
+    (agents / "devops" / "agent.json").write_text(json.dumps(
+        {"schema": "alfred.agent/1", "id": "devops", "name": "DevOps Engineer",
+         "provider": "claude", "model": "claude-sonnet-5-5", "effort": "high",
+         "style": "balanced", "squads": ["infra"]}))
+    for name in agent_profiles.FILES:
+        (agents / "devops" / name).write_text("# " + name + "\n\nown text")
+    (agents / "squads.json").write_text(json.dumps({"squads": {"infra": {}}}))
+    if charter is not None:
+        (agents / agent_profiles.CHARTER).write_text(charter)
+    return agents
+
+
+def _install(tmp_path, bundle):
+    path = tmp_path / "agent_profiles.json"
+    path.write_text(json.dumps(bundle))
+    path.chmod(0o644)
+    return path
+
+
+def test_the_charter_is_stored_once_and_put_in_front_of_each_identity(tmp_path):
+    bundle = agent_profiles.build(_profiles(tmp_path, "# Workforce charter\n\nShared.\n"),
+                                  "0" * 40)
+    assert bundle["charter"] == "# Workforce charter\n\nShared."
+    assert "Shared." not in bundle["agents"]["devops"]["text"]
+    text = agent_profiles.identity("devops", _install(tmp_path, bundle))
+    assert text.startswith("# Workforce charter\n\nShared.\n\n# Soul.md")
+    assert text.count("Shared.") == 1
+
+
+def test_without_a_charter_the_bundle_and_identity_are_unchanged(tmp_path):
+    bundle = agent_profiles.build(_profiles(tmp_path), "0" * 40)
+    assert "charter" not in bundle
+    assert agent_profiles.identity("devops", _install(tmp_path, bundle)).startswith("# Soul.md")
+
+
+def test_an_empty_or_oversized_charter_is_refused(tmp_path):
+    with pytest.raises(ValueError):
+        agent_profiles.build(_profiles(tmp_path / "a", "  \n"), "0" * 40)
+    with pytest.raises(ValueError):
+        agent_profiles.build(_profiles(tmp_path / "b", "x" * (agent_profiles.MAX_CHARTER + 1)),
+                             "0" * 40)
+    bundle = agent_profiles.build(_profiles(tmp_path / "c"), "0" * 40)
+    bundle["charter"] = ["not text"]
+    with pytest.raises(Denied):
+        agent_profiles.identity("devops", _install(tmp_path, bundle))
 
 
 # --- The per-role model catalog -------------------------------------------------------------
