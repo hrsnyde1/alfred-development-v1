@@ -91,7 +91,7 @@ class MultiplyBroker:
     def authenticated(self):
         return True
 
-    def generate(self, choice, *, objective, sources, identity=""):
+    def generate(self, choice, *, objective, sources, identity="", project_context=""):
         assert "multiply(a: int, b: int)" in objective
         assert (
             "def subtract" in sources["calculator.py"]

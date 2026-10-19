@@ -8,7 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from developer_v1 import team_skills, team_snapshot
+from developer_v1 import repo_intelligence, team_skills, team_snapshot
 from developer_v1.router import select_specialists
 from fresh_v1.diagnostics import WorkerFailure, failure, planning_output
 from fresh_v1.handoffs import write_once
@@ -139,6 +139,8 @@ def prepare_plan(job, policy, *, remote_main=None, fetch=True):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(data)
             evidence = cto._repo_evidence(snapshot, name)
+            # handoff.34: facts and owner notes from this exact snapshot of main.
+            facts, notes = repo_intelligence.scan_snapshot(snapshot)
         plan = cto._central_cto(spec, repo, evidence, hashlib.sha256(raw).hexdigest())
         plan["baseline_revision"] = remote_main
         present = [p for p in policy["allowed_scope"] if p in evidence["files"]]
@@ -177,6 +179,27 @@ def prepare_plan(job, policy, *, remote_main=None, fetch=True):
         )
         if cto_profile is not None:
             plan["team_profile"] = cto_profile.manifest_sha256
+        # handoff.34: what Alfred already knows about the project's repositories, as one
+        # compact block in the planning note, so the owner's grant binds it with the plan
+        # and the specialists receive it from the approved plan. Repository content is
+        # data: the block never changes the scope, specialists or files decided above.
+        repo_intelligence.attach(
+            plan,
+            spec,
+            project=job["project"],
+            task_id=job["task_id"],
+            name=getattr(project, "display_name", None),
+            facts=facts,
+            notes=notes,
+            commit=remote_main,
+            destination=policy["destination"],
+            scope=scope,
+            config_path=Path(policy.get("repo_config") or repo_intelligence.CONFIG),
+            config_owner=policy.get("repo_config_owner", 0),
+            store=Path(policy.get("repo_intelligence") or repo_intelligence.STORE),
+            handoffs=Path(policy.get("jobs") or repo_intelligence.HANDOFFS),
+            state=Path(policy.get("developer_state") or repo_intelligence.DEVELOPER_STATE),
+        )
         path = (
             Path(policy["gateway_state"])
             / "cto-plans"

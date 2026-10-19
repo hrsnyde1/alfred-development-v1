@@ -10,7 +10,7 @@ from pathlib import Path
 from .execution import AssignmentStore, _git, build_assignments, invoke, qa_manifest
 from .gateway_adapter import GatewayInputs, read_gateway_inputs
 from .owner_grants import ProtectedDevelopmentAuthority, _digest
-from . import agent_profiles, team_skills, team_snapshot
+from . import agent_profiles, repo_intelligence, team_skills, team_snapshot
 from .real_worker import (MAX_PRACTICES, CodexReadOnlyBroker, DeveloperWorker,
                           RoutingBroker, create_worktree)
 from .router import (CAPABILITY_BY_ROLE, Denied, ModelChoice, route, select_model,
@@ -74,6 +74,9 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
     # leaves the owner's grant unused. Each specialist gets only its share.
     skills = team_skills.for_specialists(plan, spec, dispatch["specialists"],
                                          team_skills_root, owner=team_skills_owner)
+    # handoff.34: what Alfred knows about the project's repositories, exactly as the
+    # owner approved it inside the plan. Background data only; it grants nothing.
+    context = repo_intelligence.from_plan(plan)
     # Owner-approved Alfred OS files, when a verified snapshot exists; otherwise the
     # built-in profile exactly as before. Read once, before the grant is claimed.
     profiles = {s: team_snapshot.profile(
@@ -83,6 +86,11 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
                 for s in dispatch["specialists"]}
     identities = {s: text for s, (text, _) in profiles.items()}
     team_records = {s: record for s, (_, record) in profiles.items()}
+    # The owner's team files come first: the block never pushes a specialist over the
+    # prompt budget, it is left out instead.
+    contexts = {s: context if len(json.dumps(skills[s], ensure_ascii=False).encode())
+                + len(identities[s].encode()) + len(context.encode()) <= MAX_PRACTICES else ""
+                for s in dispatch["specialists"]}
     overrides = overrides or {}
     if set(overrides) - set(dispatch["specialists"]):
         raise Denied("model override outside assigned specialists")
@@ -117,7 +125,7 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
         result = _execute_claimed(inputs, dispatch, assignments, choices,
                                   worktree_root, state_root, project, task_id,
                                   broker, checks, authority, baseline_revision, skills,
-                                  fix_round, identities, team_records)
+                                  fix_round, identities, team_records, contexts)
     except BaseException as exc:
         authority.finish(grant_reference, status="failed" if isinstance(exc, Exception) else "uncertain",
                          fix_round=fix_round)
@@ -128,7 +136,8 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
 
 def _execute_claimed(inputs, dispatch, assignments, choices, worktree_root,
                      state_root, project, task_id, broker, checks, authority, baseline_revision,
-                     skills=None, fix_round=0, identities=None, team_records=None):
+                     skills=None, fix_round=0, identities=None, team_records=None,
+                     contexts=None):
     state = AssignmentStore(state_root / project / task_id)
     # A single final branch carries every completed developer commit to QA.
     final = create_worktree(inputs.repository, worktree_root, project, task_id,
@@ -151,7 +160,8 @@ def _execute_claimed(inputs, dispatch, assignments, choices, worktree_root,
                                  skills=(skills or {}).get(item["specialist"], ()),
                                  identity=(identities or {}).get(item["specialist"], ""),
                                  team_profile=(team_records or {}).get(item["specialist"],
-                                                                        team_snapshot.BUILTIN))
+                                                                        team_snapshot.BUILTIN),
+                                 project_context=(contexts or {}).get(item["specialist"], ""))
         report = invoke(dispatch, item, worktree=worktree, model=first, worker=worker,
                         store=state, trusted_authority=authority, approved_fallback=fallback)
         reports.append(report)

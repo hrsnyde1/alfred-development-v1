@@ -61,7 +61,9 @@ class ApprovalEvidenceHostDelta(unittest.TestCase):
                                     # Alfred OS passkey approvals.
                                     "owner_passkey.py", "owner_approval.py",
                                     "enroll_owner_passkey.py", "stage_publication.py",
-                                    "alfred-development-intake-owner-approval.conf"})
+                                    "alfred-development-intake-owner-approval.conf",
+                                    # handoff.34 Repo Intelligence.
+                                    "repo_intelligence.py"})
         self.assertNotEqual(HISTORICAL.joinpath("trusted_intake_development.py").read_bytes(),
                             PACKAGE.joinpath("trusted_intake_development.py").read_bytes())
 

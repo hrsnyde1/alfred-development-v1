@@ -1,0 +1,25 @@
+{
+  "schema": "alfred.project-repos/1",
+  "enabled": true,
+  "summary_model": {
+    "primary": {"provider": "claude", "model": "claude-sonnet-5-5"},
+    "fallback": {"provider": "codex", "model": "gpt-6-sol"},
+    "reasoning_effort": "low"
+  },
+  "projects": {
+    "demo-site": {
+      "name": "Harbor & Pine demo site",
+      "repos": [
+        {"id": "site", "github": "hrsnyde1/alfred-demo-site", "branch": "main", "primary": true,
+         "purpose": "Harbor & Pine demo website: static pages plus Python functions in api/"}
+      ]
+    },
+    "dev-v1-accept": {
+      "name": "Developer V1 Acceptance Fixture",
+      "repos": [
+        {"id": "app", "github": "hrsnyde1/alfred-dev-v1-acceptance", "branch": "main", "primary": true,
+         "purpose": "Calculator used for Developer V1 acceptance"}
+      ]
+    }
+  }
+}

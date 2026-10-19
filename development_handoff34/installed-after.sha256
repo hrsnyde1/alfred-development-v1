@@ -1,0 +1,8 @@
+c3833cd96670f692211fd8679b761888fa5ed6ff9e049662f03712e36352401f  /usr/local/lib/alfred-fresh-v1/fresh_v1/role.py
+614ef9ad97a88a43d6f50e18ea28d6ff38b3631db3e4524ef2018509a44c48cf  /opt/alfred-developer-v1/developer_v1/pipeline.py
+ccfc88efdaa26e375386760b194f496a7d78e6b10261bc8abd017aa6dacb54e0  /opt/alfred-developer-v1/developer_v1/real_worker.py
+fec05e8bf3ddc9594fd9cf0e07640da5b296523abc15db19ccbd7d0f79112064  /opt/alfred-developer-v1/developer_v1/repo_intelligence.py
+1945218c513f8be1dafb0337e885a68bcc91a04ee18d77c83294c47ed5874895  /opt/alfred-developer-v1/developer_v1/schemas/repo-summary.schema.json
+e090116d5935afe6c9cfc417f8d218bd830ecc93403101cf9d8b5bd24b97b1be  /etc/alfred-development/repos.json
+f64c41c7cc5e9608524b968aa4348404d6c687704617a11d83b9ee4ac98fb6c3  /etc/systemd/system/alfred-repo-intelligence.service
+700fe2cf4f0e0e676e1d002ca964292ae1e6f8ba4ad3da292f5c22743939bd26  /etc/systemd/system/alfred-repo-intelligence.timer
