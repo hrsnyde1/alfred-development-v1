@@ -27,6 +27,10 @@ FILES = ("Soul.md", "Role.md", "Skills.md", "Tools.md", "Workflow.md", "Quality.
          "Handoff.md", "Memory.md")
 # Read when an agent has it (the CTO first, 2026-10-19); appended after FILES.
 OPTIONAL = ("Escalation.md",)
+# Rules every agent shares (agents/CHARTER.md), stored once in the bundle and put in
+# front of each agent's own files, so those files need not repeat them.
+CHARTER = "CHARTER.md"
+MAX_CHARTER = 4096
 FIELDS = {"schema", "id", "name", "provider", "model", "effort", "style", "squads"}
 AGENT_ID = re.compile(r"^[a-z][a-z_]{1,31}$")
 MAX_PROFILE = 12288
@@ -57,13 +61,17 @@ def _bundle(path: Path | None) -> dict:
 
 def identity(agent: str, path: Path | None = None) -> str:
     """The identity prompt for one agent; empty when the release carries no profile."""
-    profile = _bundle(path).get("agents", {}).get(agent)
+    bundle = _bundle(path)
+    profile = bundle.get("agents", {}).get(agent)
     if profile is None:
         return ""
     text = profile.get("text")
     if type(text) is not str or not text or len(text.encode()) > MAX_PROFILE:
         raise Denied("agent profile invalid: " + agent)
-    return text
+    charter = bundle.get("charter", "")
+    if type(charter) is not str or len(charter.encode()) > MAX_CHARTER:
+        raise Denied("agent charter invalid")
+    return charter + "\n\n" + text if charter else text
 
 
 def card(agent: str, path: Path | None = None) -> dict | None:
@@ -89,9 +97,15 @@ def build(agents_dir: Path, commit: str) -> dict:
             raise ValueError("profile too large: " + folder.name)
         agents[meta["id"]] = {"card": meta, "text": text}
     squads = json.loads((agents_dir / "squads.json").read_text())
-    return {"schema": SCHEMA, "source": {"repository": "hrsnyde1/alfred-team-skills",
-                                         "commit": commit}, "squads": squads["squads"],
-            "agents": agents}
+    bundle = {"schema": SCHEMA, "source": {"repository": "hrsnyde1/alfred-team-skills",
+                                           "commit": commit}, "squads": squads["squads"],
+              "agents": agents}
+    if (agents_dir / CHARTER).is_file():
+        charter = (agents_dir / CHARTER).read_text().strip()
+        if not charter or len(charter.encode()) > MAX_CHARTER:
+            raise ValueError("bad " + CHARTER)
+        bundle["charter"] = charter
+    return bundle
 
 
 if __name__ == "__main__":
