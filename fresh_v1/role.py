@@ -9,10 +9,10 @@ import tempfile
 from pathlib import Path
 
 from developer_v1 import repo_intelligence, team_skills, team_snapshot
-from developer_v1.router import select_specialists
+from developer_v1.router import Denied, select_specialists
 from fresh_v1.diagnostics import WorkerFailure, failure, planning_output
 from fresh_v1.handoffs import write_once
-from fresh_v1.host import work_items
+from fresh_v1.host import WEB_SUFFIXES, work_items
 from fresh_v1.protected import identity, protected_json
 
 # Read-only view of the gateway directory inside the Evidence sandbox (drop-in
@@ -36,6 +36,53 @@ def git(repo, *args):
         .decode()
         .strip()
     )
+
+
+def by_files(files, allowed):
+    """Who owns these files in this project: web files are Frontend's, the rest
+    Backend's; Builder takes the whole job when the project staffs no such split."""
+    web = [f for f in files if f.lower().endswith(WEB_SUFFIXES)]
+    needed = (["backend"] if len(web) < len(files) else []) + (["frontend"] if web else [])
+    for specialists in (needed, ["builder"]):
+        if specialists and set(specialists) <= set(allowed):
+            try:
+                work_items(files, specialists, "")
+            except ValueError:
+                continue
+            return specialists
+    return []
+
+
+def staff(spec, plan, present, allowed):
+    """(specialists, approved files, whether the plan must list the files).
+
+    handoff.36 and before: the CTO's keyword routing, used whenever the project allows
+    it, so every request that routed before routes the same way. A plain-language
+    request it cannot place ("make the UI clean, with hover and scrolling") is staffed
+    from the files the CTO expects to change, within the project's specialists.
+    """
+    try:
+        proposed = select_specialists(spec, plan)
+    except Denied:
+        proposed = []
+    # Files the request names. A plain-language request ("add dark mode") names
+    # none: then the files the CTO itself expects to change, when they can staff
+    # every specialist, else every allowed file. Sorted, as the approval binds it.
+    named = sorted(p for p in present if p in plan["scope"])
+    expected = sorted(p for p in present if p in plan.get("expected_components_files", []))
+    if proposed and set(proposed) <= set(allowed):
+        if named:
+            return proposed, named, False
+        try:
+            work_items(expected, proposed, "")
+            return proposed, expected, True
+        except ValueError:
+            return proposed, sorted(present), True
+    for files in ([named] if named else [expected, sorted(present)]):
+        specialists = by_files(files, allowed) if files else []
+        if specialists:
+            return specialists, files, not named
+    return proposed, [], False
 
 
 def prepare_plan(job, policy, *, remote_main=None, fetch=True):
@@ -144,23 +191,11 @@ def prepare_plan(job, policy, *, remote_main=None, fetch=True):
         plan = cto._central_cto(spec, repo, evidence, hashlib.sha256(raw).hexdigest())
         plan["baseline_revision"] = remote_main
         present = [p for p in policy["allowed_scope"] if p in evidence["files"]]
-        specialists = select_specialists(spec, plan)
-        # Files the request names. A plain-language request ("add dark mode") names
-        # none: then the files the CTO itself expects to change, when they can staff
-        # every specialist, else every allowed file. Sorted, as the approval binds it.
-        named = [p for p in present if p in plan["scope"]]
-        scope = sorted(named)
-        if not named:
-            expected = [p for p in present if p in plan.get("expected_components_files", [])]
-            try:
-                work_items(expected, specialists, "")
-                scope = sorted(expected)
-            except ValueError:
-                scope = sorted(present)
-            # Independent QA checks every approved file against the plan's scope, so
-            # the plan names the files it approves.
-            if scope:
-                plan["scope"] += "\nApproved files: " + ", ".join(scope)
+        specialists, scope, listed = staff(spec, plan, present, policy["specialists"])
+        # Independent QA checks every approved file against the plan's scope, so
+        # the plan names the files it approves.
+        if listed and scope:
+            plan["scope"] += "\nApproved files: " + ", ".join(scope)
         if (
             not scope
             or not set(specialists) <= set(policy["specialists"])
