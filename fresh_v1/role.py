@@ -62,7 +62,9 @@ def staff(spec, plan, present, allowed):
     from the files the CTO expects to change, within the project's specialists.
     """
     try:
-        proposed = select_specialists(spec, plan)
+        # The keyword guess, never an earlier record: the plan step makes the record.
+        proposed = select_specialists(
+            spec, {k: v for k, v in plan.items() if k != "specialists"})
     except Denied:
         proposed = []
     # Files the request names. A plain-language request ("add dark mode") names
@@ -202,6 +204,10 @@ def prepare_plan(job, policy, *, remote_main=None, fetch=True):
             or plan["clarification_required"]
         ):
             raise ValueError("scope or specialist requires clarification")
+        # handoff.39: the staffing decided here is recorded in the plan the owner
+        # approves, so intake's approval request and the developer dispatch use it
+        # instead of guessing again from keywords.
+        plan["specialists"] = list(specialists)
         # Owner-approved team skills from the pinned library snapshot, recorded by id
         # and digest so the development grant (bound to this plan) fixes their text.
         team_skills.attach(plan, spec, specialists)

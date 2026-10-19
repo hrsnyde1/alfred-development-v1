@@ -80,3 +80,39 @@ def test_nothing_the_project_staffs_means_clarification():
 ])
 def test_by_files(files, allowed, expected):
     assert by_files(files, allowed) == expected
+
+
+# --- handoff.39: one staffing record, read by every later step ------------------------
+
+from developer_v1.router import Denied, select_specialists  # noqa: E402
+
+T0008 = spec("Harbor & Pine Studio demo site: UI/UX polish (scroll, hover, "
+             "micro-interactions)", "Alfred-demo-site: clean scrolling and hover states")
+
+
+def test_the_plan_s_record_is_what_approval_and_dispatch_route_by():
+    # demo-site T-0009 (2026-10-19): the plan step chose Frontend, but intake's approval
+    # request and the developer dispatch guessed Builder again from keywords, so the
+    # developer step refused the approved Frontend work item.
+    assert select_specialists(T0008, plan()) == ["builder"]
+    assert select_specialists(T0008, {**plan(), "specialists": ["frontend"]}) == ["frontend"]
+
+
+def test_the_plan_step_ignores_an_earlier_record_and_decides_afresh():
+    stale = {**plan(expected=["app.js", "index.html", "styles.css"]), "specialists": ["backend"]}
+    specialists, files, _ = staff(T0008, stale, DEMO_SITE, ["backend", "frontend"])
+    assert specialists == ["frontend"] and files == ["app.js", "index.html", "styles.css"]
+
+
+@pytest.mark.parametrize("record", [[], ["frontend", "frontend"], ["wizard"], "frontend", [1]])
+def test_an_invalid_record_is_refused(record):
+    with pytest.raises(Denied):
+        select_specialists(T0008, {**plan(), "specialists": record})
+
+
+def test_the_schema_accepts_the_record_and_nothing_else_new():
+    import json
+    from pathlib import Path
+    schema = json.loads((Path(__file__).resolve().parents[1] / "v1_cto/plan.schema.json").read_text())
+    assert schema["additionalProperties"] is False
+    assert schema["properties"]["specialists"]["minItems"] == 1
