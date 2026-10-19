@@ -229,10 +229,14 @@ def load(commit: str, root: Path = ROOT, *, owner: int = 0) -> Library:
     return Library(commit, budget, skills)
 
 
+def _task_text(spec: dict) -> str:
+    sections = spec.get("sections") or {}
+    return " ".join(str(x) for x in (spec.get("title", ""), sections.get("objective", ""))).lower()
+
+
 def select(library: Library, spec: dict, specialists: list[str]) -> list[Skill]:
     """A skill applies when it names none of the filters, or matches one of them."""
-    sections = spec.get("sections") or {}
-    text = " ".join(str(x) for x in (spec.get("title", ""), sections.get("objective", ""))).lower()
+    text = _task_text(spec)
     chosen = []
     for skill in library.skills:
         general = not skill.specialists and not skill.keywords
@@ -260,6 +264,38 @@ def attach(plan: dict, spec: dict, specialists: list[str], root: Path = ROOT, *,
 
 def for_plan(plan: dict, root: Path = ROOT, *, owner: int = 0) -> list[dict]:
     """Development: the approved plan's skill text, verified against its recorded digests."""
+    return [_payload(s) for s in _approved(plan, root, owner=owner)]
+
+
+def for_specialists(plan: dict, spec: dict, specialists: list[str], root: Path = ROOT, *,
+                    owner: int = 0) -> dict[str, list[dict]]:
+    """Development: each assigned specialist's share of the approved plan's skills.
+
+    A skill that names some of the task's specialists goes only to them. A general
+    skill, or one matched by a task keyword alone, goes to every specialist on the
+    task; any other approved skill goes to none. The split is derived only from the
+    approved plan, the approved spec and the pinned library, so the owner's grant
+    still fixes it.
+    """
+    approved = _approved(plan, root, owner=owner)
+    text = _task_text(spec)
+    assigned = list(dict.fromkeys(specialists))
+    shares: dict[str, list[dict]] = {s: [] for s in assigned}
+    for skill in approved:
+        named = [s for s in assigned if s in skill.specialists]
+        general = not skill.specialists and not skill.keywords
+        if not named and (general or any(k in text for k in skill.keywords)):
+            named = assigned
+        for specialist in named:
+            shares[specialist].append(_payload(skill))
+    return shares
+
+
+def _payload(skill: Skill) -> dict:
+    return {"id": skill.id, "title": skill.title, "instructions": skill.body}
+
+
+def _approved(plan: dict, root: Path, *, owner: int) -> list[Skill]:
     record = plan.get("team_skills")
     if record is None:
         return []
@@ -276,7 +312,7 @@ def for_plan(plan: dict, root: Path = ROOT, *, owner: int = 0) -> list[dict]:
         if skill is None or entry != {"id": skill.id, "title": skill.title,
                                       "sha256": skill.sha256, "tokens": skill.tokens}:
             raise Denied("approved team skill differs from the pinned library")
-        result.append({"id": skill.id, "title": skill.title, "instructions": skill.body})
-    if sum(estimate_tokens(s["instructions"]) for s in result) > library.budget_tokens:
+        result.append(skill)
+    if sum(estimate_tokens(s.body) for s in result) > library.budget_tokens:
         raise Denied("team skills exceed the CTO token budget")
     return result

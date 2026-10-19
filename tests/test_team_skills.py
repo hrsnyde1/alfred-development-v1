@@ -109,6 +109,31 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual([s["id"] for s in loaded], [s["id"] for s in record["skills"]])
         self.assertIn("write the failing test first", loaded[0]["instructions"])
 
+    def test_each_specialist_receives_only_its_share(self):
+        self.write(skill("general-tests"),
+                   skill("backend-contracts", applies={"specialists": ["backend"]}),
+                   skill("frontend-a11y", applies={"specialists": ["frontend"]}),
+                   skill("subtract-keyword", applies={"keywords": ["subtract"]}),
+                   skill("security-or-subtract",
+                         applies={"specialists": ["security"], "keywords": ["subtract"]}))
+        plan = team_skills.attach({}, SPEC, ["backend", "frontend"], self.root, owner=OWNER)
+        self.assertEqual(len(plan["team_skills"]["skills"]), 5)
+        shares = team_skills.for_specialists(plan, SPEC, ["backend", "frontend"], self.root, owner=OWNER)
+        ids = {s: [x["id"] for x in share] for s, share in shares.items()}
+        self.assertEqual(ids, {
+            "backend": ["backend-contracts", "general-tests", "security-or-subtract", "subtract-keyword"],
+            "frontend": ["frontend-a11y", "general-tests", "security-or-subtract", "subtract-keyword"]})
+        # A skill naming one of the task's specialists stays with it even when a keyword matches.
+        shares = team_skills.for_specialists(plan, SPEC, ["backend", "security"], self.root, owner=OWNER)
+        self.assertEqual([x["id"] for x in shares["security"]],
+                         ["general-tests", "security-or-subtract", "subtract-keyword"])
+        self.assertNotIn("security-or-subtract", [x["id"] for x in shares["backend"]])
+        # A specialist-only skill for a specialist not on the task reaches no one.
+        shares = team_skills.for_specialists(plan, SPEC, ["backend"], self.root, owner=OWNER)
+        self.assertNotIn("frontend-a11y", [x["id"] for x in shares["backend"]])
+        self.assertEqual(team_skills.for_specialists({}, SPEC, ["backend"], self.root, owner=OWNER),
+                         {"backend": []})
+
     def test_development_uses_the_plan_commit_not_the_current_pin(self):
         self.write(skill("general-tests"))
         plan = team_skills.attach({}, SPEC, ["backend"], self.root, owner=OWNER)
@@ -245,8 +270,10 @@ class ApprovedPlanExecutionTest(execution.ExecutionFixture):
         super().setUp()
         self.skill_root = self.root / "team-skills"
         self.skill_root.mkdir()
-        snapshot(self.skill_root, dict([skill("general-tests")]))
-        team_skills.attach(self.plan, self.spec, ["backend"], self.skill_root, owner=OWNER)
+        snapshot(self.skill_root, dict([skill("general-tests"),
+                                        skill("frontend-a11y", applies={"specialists": ["frontend"]})]))
+        # The plan carries a frontend skill too; the backend developer must not receive it.
+        team_skills.attach(self.plan, self.spec, ["backend", "frontend"], self.skill_root, owner=OWNER)
         self.plan_raw = raw(self.plan)
         self.inputs = GatewayInputs(self.repo, self.spec_raw, self.plan_raw, json.loads)
         self.request = approval_request(self.spec_raw, self.plan_raw, project="dev-999",

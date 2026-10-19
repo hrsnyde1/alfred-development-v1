@@ -5,7 +5,6 @@ real listener in this process with an ACL naming a stand-in Alfred OS UID."""
 
 import hashlib
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -17,6 +16,14 @@ ROOT = Path(__file__).resolve().parents[1]
 CHECKER = ROOT / "live-acceptance" / "verify_owner_passkey_host_update.py"
 PINS = ROOT / "live-acceptance" / "passkey-approval-update"
 GATEWAY_OUTPUT = "ActiveState=active\nResult=success\n"
+# The commit that released the passkey approvals. The checker pins that release, so the
+# simulated host and the pin checks use its files, not later work in the checkout.
+RELEASED = "b0da3d8"
+
+
+def released(relative: str) -> bytes:
+    return subprocess.run(["git", "-C", str(ROOT), "show", f"{RELEASED}:{relative}"],
+                          capture_output=True, check=True).stdout
 
 
 def digest(data: bytes) -> str:
@@ -28,8 +35,11 @@ def host(tmp_path):
     from developer_v1 import owner_approval
     from developer_v1 import trusted_intake_development as intake
     developer = tmp_path / "opt"
-    shutil.copytree(ROOT / "developer_v1", developer / "developer_v1",
-                    ignore=shutil.ignore_patterns("__pycache__", "HOST_ACCEPTANCE.md"))
+    developer.mkdir()
+    archive = subprocess.run(["git", "-C", str(ROOT), "archive", RELEASED, "developer_v1"],
+                             capture_output=True, check=True).stdout
+    subprocess.run(["tar", "-x", "-C", str(developer)], input=archive, check=True)
+    (developer / "developer_v1" / "HOST_ACCEPTANCE.md").unlink(missing_ok=True)
     sockets = tmp_path / "run"
     sockets.mkdir(mode=0o700)
     (sockets / "intake.sock").touch()
@@ -102,14 +112,14 @@ def test_wrong_alfred_os_uid_in_the_acl_fails(host):
 
 
 def test_pinned_manifest_is_the_released_one():
-    assert digest((ROOT / "developer_v1/release.sha256").read_bytes()) in CHECKER.read_text()
+    assert digest(released("developer_v1/release.sha256")) in CHECKER.read_text()
 
 
 def test_update_pins_match_the_checkout_and_the_procedure():
     staged = [line.split("  ") for line in (PINS / "staged.sha256").read_text().splitlines()]
     for sha, relative in staged:
-        assert digest((ROOT / relative).read_bytes()) == sha, relative
-    text = (ROOT / "developer_v1" / "HOST_ACCEPTANCE.md").read_text()
+        assert digest(released(relative)) == sha, relative
+    text = released("developer_v1/HOST_ACCEPTANCE.md").decode()
     for name in ("staged.sha256", "installed-before.sha256", "installed-after.sha256"):
         assert digest((PINS / name).read_bytes()) in text, name
     assert digest(CHECKER.read_bytes()) in text
