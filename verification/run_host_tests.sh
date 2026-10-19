@@ -172,6 +172,11 @@ run handoff33 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_plan_appr
   tests/test_auto_merge_undo.py tests/test_delegated_development_approval.py \
   tests/test_independent_qa.py tests/test_dev_squads.py --junitxml="$OUT/handoff33.xml"
 
+# handoff.34: Repo Intelligence; the CTO plan and the specialists know the repositories.
+run handoff34 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_repo_intelligence.py \
+  tests/test_development_handoff34_upgrade.py tests/test_team_snapshot.py tests/test_team_skills.py \
+  tests/test_claude_agents.py tests/test_fix_loop.py --junitxml="$OUT/handoff34.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"

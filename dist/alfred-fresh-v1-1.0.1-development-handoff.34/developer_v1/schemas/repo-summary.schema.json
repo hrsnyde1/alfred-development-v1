@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "architecture", "conventions", "directories"],
+  "properties": {
+    "summary": {"type": "string", "maxLength": 600},
+    "architecture": {"type": "string", "maxLength": 600},
+    "conventions": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {"type": "string", "maxLength": 200}
+    },
+    "directories": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "purpose"],
+        "properties": {
+          "path": {"type": "string", "maxLength": 200},
+          "purpose": {"type": "string", "maxLength": 160}
+        }
+      }
+    }
+  }
+}

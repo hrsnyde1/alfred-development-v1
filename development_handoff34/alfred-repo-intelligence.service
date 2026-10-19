@@ -1,0 +1,27 @@
+[Unit]
+Description=Alfred Development: Repo Intelligence profiles each project's repositories (read-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=alfred
+Group=alfred
+WorkingDirectory=/opt/alfred-developer-v1
+Environment=PATH=/usr/bin:/bin
+ExecStart=/usr/bin/python3 -B -s -E -m developer_v1.repo_intelligence refresh
+StateDirectory=alfred-repo-intelligence
+StateDirectoryMode=0700
+UMask=0077
+Nice=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/alfred-development-state/claude-agents
+ReadWritePaths=-/home/alfred/.codex
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+TimeoutStartSec=900

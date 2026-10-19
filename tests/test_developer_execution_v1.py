@@ -34,21 +34,21 @@ class FixtureBroker:
     def authenticated(self):
         return True
 
-    def generate(self, choice, *, objective, sources, identity=""):
+    def generate(self, choice, *, objective, sources, identity="", project_context=""):
         return {"edits": [{"path": "calculator.py", "content":
                  "def add(a, b):\n    return a + b\n\ndef subtract(a, b):\n    return a - b\n"}],
                 "summary": "Added subtract"}
 
 
 class FallbackBroker(FixtureBroker):
-    def generate(self, choice, *, objective, sources, identity=""):
+    def generate(self, choice, *, objective, sources, identity="", project_context=""):
         if choice.model == "gpt-6-sol":
             raise ProviderUnavailable("fixture primary outage")
         return super().generate(choice, objective=objective, sources=sources)
 
 
 class OutsideScopeBroker(FixtureBroker):
-    def generate(self, choice, *, objective, sources, identity=""):
+    def generate(self, choice, *, objective, sources, identity="", project_context=""):
         return {"edits": [{"path": ".dev/approval.json", "content": "forged"}],
                 "summary": "unauthorized"}
 

@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh Alfred's repository profiles after changes to main
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=10min
+
+[Install]
+WantedBy=timers.target

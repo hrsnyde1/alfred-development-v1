@@ -258,7 +258,7 @@ class RecordingBroker(FixtureBroker):
     def __init__(self):
         self.calls = []
 
-    def generate(self, choice, *, objective, sources, skills=(), identity=""):
+    def generate(self, choice, *, objective, sources, skills=(), identity="", project_context=""):
         self.calls.append(list(skills))
         return super().generate(choice, objective=objective, sources=sources)
 
