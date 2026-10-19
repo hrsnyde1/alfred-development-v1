@@ -37,6 +37,8 @@ from developer_v1.owner_grants import (
     DevelopmentGrantIssuer,
     DevelopmentSendFailure,
     _rename_noreplace,
+    load_delegation_policy,
+    plan_approval_requested,
 )
 from developer_v1.publication_approval import PublicationApprovalIssuer
 from developer_v1 import owner_approval
@@ -70,7 +72,8 @@ _INFORMATION_ONLY = re.compile(r"^\s*(?:what(?:'s|\s+is|\s+are)|why|how\s+(?:is|
 
 def _development_request_text(text: str, *, project: str | None = None) -> bool:
     """A request names a registered project, or asks for software work in any wording.
-    Plain questions stay chat. The owner still confirms the preview before anything runs."""
+    Plain questions stay chat. The owner still approves (the preview, or the CTO plan text)
+    before anything runs."""
     if _INFORMATION_ONLY.search(text):
         return False
     if project:
@@ -162,7 +165,8 @@ class IntakeGate:
                  intake_dir: Path, gateway_dir: Path, clock=time.monotonic,
                  preview_sender=None, development_issuer=None, development_inputs=None,
                  publication_issuer=None, registry_path: Path | None = None,
-                 request_route_root: Path | None = None, undo_issuer=None) -> None:
+                 request_route_root: Path | None = None, undo_issuer=None,
+                 delegation_policy: Path | None = None, policy_owner: int = 0) -> None:
         if not owner_sender_id or sidecar_uid == hermes_uid:
             raise ValueError("owner and distinct sidecar/Hermes identities are required")
         self.owner_sender_id = owner_sender_id
@@ -181,6 +185,9 @@ class IntakeGate:
         self.undo_issuer = undo_issuer
         self.registry_path = registry_path
         self.request_route_root = request_route_root
+        # handoff.33: the owner's root policy. A project in its "owner" mode is filed with
+        # no preview; the owner's one text is the CTO plan. None: every request previews.
+        self.delegation_policy, self.policy_owner = delegation_policy, policy_owner
         self._lock = threading.Lock()
         self._observed: dict[str, Observed] = {}
         self._retired: dict[str, str] = {}
@@ -329,6 +336,8 @@ class IntakeGate:
                     space_id=request.get("space_id"), peer_uid=peer_uid,
                     channel=_channel(request),
                     title=str(plan.get("objective") or "").strip().split("\n")[0] or None,
+                    project_name=(self._display_name(request["project"])
+                                  if getattr(self, "registry_path", None) is not None else None),
                     **({"plan_raw": inputs.plan_raw} if plan.get("baseline_revision") else {}))
             except (Denied, OSError, ValueError) as exc:
                 try:
@@ -504,6 +513,16 @@ class IntakeGate:
             raise IntakeRefused("explicit_authorized_project_required")
         return matches[0].id
 
+    def _plan_approval(self, project: str) -> bool:
+        """Whether the owner's root policy has this project's plan approved by the owner's
+        yes to the plan text. Unreadable or invalid: no, so the request previews as before."""
+        try:
+            policy = load_delegation_policy(getattr(self, "delegation_policy", None),
+                                            owner_uid=getattr(self, "policy_owner", 0))
+        except Denied:
+            return False
+        return plan_approval_requested(policy, project)
+
     def _display_name(self, project_id: str) -> str:
         """The registry's human name for a project (e.g. "SC Products Group website")."""
         from alfred.registry.loader import parse_registry, read_registry_data
@@ -515,8 +534,8 @@ class IntakeGate:
         """Hermes asks a clarifying question first, then submits the owner's short answer
         ("2", "yes"), which names no project. File the owner's own request from the same
         DM within the event lifetime instead, exactly as if Hermes had submitted it. The
-        project still comes only from genuine owner text, and the preview still needs the
-        owner's native confirmation."""
+        project still comes only from genuine owner text, and nothing runs before the
+        owner's native yes (to the preview, or to the CTO plan text)."""
         now = self.clock()
         candidates = []
         for record in self._observed.values():
@@ -588,6 +607,25 @@ class IntakeGate:
             draft_digest = hashlib.sha256(data).hexdigest()
             if active.draft_digest and active.draft_digest != draft_digest:
                 raise IntakeRefused("request_conflict")
+            if active.phase == "observed" and self._plan_approval(project):
+                # The owner approves the CTO's plan instead (handoff.33): file these exact
+                # envelope bytes, bound to the owner's own message, and send nothing.
+                active.draft_digest = draft_digest
+                active.envelope_data = data
+                if self.request_route_root is not None:
+                    from developer_v1.owner_grants import _write_once
+                    _write_once(self.request_route_root, f"request-route-{active.request_id}.json", {
+                        "schema": "alfred.direct-request-route/1", "request_id": active.request_id,
+                        "project": project, "owner_id": self.owner_sender_id,
+                        "space_id": active.space_id, "request_event_id": active.message_id,
+                        "envelope_sha256": draft_digest, "approval": "owner_plan_reply",
+                        "filed_at": time.time(), "sidecar_uid": self.sidecar_uid})
+                _publish(self.intake_dir / "inbox", f"{active.request_id}.json", data)
+                active.phase = "submitted"
+                self._active = active
+                self._observed.pop(active.message_id, None)
+                self._status_turn = (active.message_id, active.text_digest, active.space_digest,
+                                     self.clock(), active.request_id)
             if active.phase == "observed":
                 preview = _preview_text(active.text, draft, draft_digest,
                                         project=self._display_name(project))
@@ -994,7 +1032,8 @@ def main() -> None:
                       undo_issuer=UndoIssuer(Path(config["development_grant_root"]),
                                              owner_sender_id=config["owner_sender_id"],
                                              sidecar_uid=config["sidecar_uid"])
-                      if development_issuer else None)
+                      if development_issuer else None,
+                      delegation_policy=DELEGATION_POLICY if development_issuer else None)
     if os.geteuid() in (gate.sidecar_uid, gate.hermes_uid):
         raise ValueError("gate identity must be distinct from both clients")
     if development_issuer is not None and passkeys:

@@ -166,6 +166,12 @@ run handoff31 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_auto_merg
   tests/test_one_yes_flow.py tests/test_completion_integration.py tests/test_dev_squads.py \
   --junitxml="$OUT/handoff31.xml"
 
+# handoff.33: the owner's one approval is the CTO plan text; listed requests file directly.
+run handoff33 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_plan_approval_flow.py \
+  tests/test_development_handoff33_upgrade.py tests/test_one_yes_flow.py \
+  tests/test_auto_merge_undo.py tests/test_delegated_development_approval.py \
+  tests/test_independent_qa.py tests/test_dev_squads.py --junitxml="$OUT/handoff33.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"

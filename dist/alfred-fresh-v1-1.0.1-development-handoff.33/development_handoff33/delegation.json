@@ -1,0 +1,13 @@
+{
+  "schema": "alfred.development-delegation-policy/1",
+  "development_approval": {
+    "enabled": true,
+    "mode": "owner",
+    "projects": [
+      "dev-v1-accept",
+      "demo-site"
+    ]
+  },
+  "publication_approval": "delegated",
+  "merge_approval": "delegated"
+}

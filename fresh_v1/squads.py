@@ -140,6 +140,11 @@ def events(directory: Path, reports: Path, now: float) -> list[dict]:
         team = ", ".join(f"{TITLES[s]} ({', '.join(context.get('scope') or [])})"
                          if len(specialists) == 1 else TITLES[s] for s in specialists)
         add("plan", at, f"📋 New task, {name}: {goal or 'see the plan'}\nTeam: {team}.")
+    challenge = _json(directory / "development-challenge.result.json")
+    if isinstance(challenge, dict) and challenge.get("state") == "awaiting_native_owner_reply":
+        # handoff.33: the owner's one text is the plan; the team waits for the yes.
+        add("plan-sent", mtime("development-challenge.result.json"),
+            f"📨 Plan for {name} sent to Hayden; waiting for the yes to start.")
     if (at := mtime("developer.attempt.json")) is not None:
         for s in specialists:
             agent, squad = TEAM[s]
@@ -187,7 +192,7 @@ def events(directory: Path, reports: Path, now: float) -> list[dict]:
         elif stage.startswith("publication-challenge"):
             if result.get("state") == "publication_delegated":
                 add(stage, at, f"📦 {name} passed review; opening the draft PR "
-                               "(Hayden approved it with the request).")
+                               "(Hayden approved it with the plan).")
             else:
                 add(stage, at, f"📨 {name} is ready; waiting for Hayden's go-ahead to publish.")
         elif stage == "publisher" or stage.startswith("publisher-retry-"):

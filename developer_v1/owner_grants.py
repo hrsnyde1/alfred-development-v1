@@ -73,14 +73,18 @@ def load_delegation_policy(path: Path | None, *, owner_uid: int) -> dict | None:
                                                      "publication_approval"}
             or policy["schema"] != DELEGATION_SCHEMA
             # "owner": the owner answers a second text before every draft PR. "delegated"
-            # (owner-authorized 2026-10-18): the owner's "yes" to the request preview also
+            # (owner-authorized 2026-10-18): the owner's "yes" for the request also
             # approves its draft PR for the same listed projects only.
             or policy["publication_approval"] not in ("owner", "delegated")
             # Absent or "owner": the owner merges. "delegated" (owner-authorized
             # 2026-10-18, handoff.31): after QA and the Reviewer pass, the pipeline
             # squash-merges the draft PR itself; the owner can reply "undo" for 24 hours.
             or policy.get("merge_approval", "owner") not in ("owner", "delegated")
-            or set(development) != {"enabled", "projects"}
+            or set(development) - {"mode"} != {"enabled", "projects"}
+            # Absent or "delegated": the policy approves the CTO plan for listed projects.
+            # "owner" (owner-authorized 2026-10-19, handoff.33): the owner gets the plan as
+            # one short text and replies yes; the list still scopes publication and merge.
+            or development.get("mode", "delegated") not in ("owner", "delegated")
             or type(development["enabled"]) is not bool
             or type(projects) is not list or len(projects) != len(set(projects))
             or any(type(p) is not str or not PROJECT_ID.fullmatch(p) for p in projects)):
@@ -98,16 +102,29 @@ def _policy_owner(environment: str) -> int:
     return 0 if environment == "host" else os.geteuid()
 
 
-def delegation_permits(policy: dict | None, project: str) -> bool:
+def listed(policy: dict | None, project: str) -> bool:
     """Only explicitly listed registered projects; never a wildcard."""
     return (policy is not None and policy["development_approval"]["enabled"]
             and project in policy["development_approval"]["projects"])
 
 
+def delegation_permits(policy: dict | None, project: str) -> bool:
+    """The CTO plan is approved by the policy itself, with no owner text."""
+    return (listed(policy, project)
+            and policy["development_approval"].get("mode", "delegated") == "delegated")
+
+
+def plan_approval_requested(policy: dict | None, project: str) -> bool:
+    """The owner approves the CTO plan by replying yes to one short plan text, and the
+    request itself is filed without a preview (handoff.33)."""
+    return (listed(policy, project)
+            and policy["development_approval"].get("mode", "delegated") == "owner")
+
+
 def publication_delegation_permits(policy: dict | None, project: str) -> bool:
-    """A draft PR without a second owner text: only where development is delegated too."""
-    return (delegation_permits(policy, project)
-            and policy["publication_approval"] == "delegated")
+    """A draft PR without a second owner text: only for a listed project, whose plan was
+    approved by the policy or by the owner's yes to the plan text."""
+    return listed(policy, project) and policy["publication_approval"] == "delegated"
 
 
 def merge_delegation_permits(policy: dict | None, project: str) -> bool:
@@ -176,6 +193,97 @@ def _challenge_text(request: dict, plan_raw: bytes | None = None) -> str:
             + summary +
             "This permits development edits in the specified worktree only; no merge or deployment.\n"
             f"Reply directly to this message within 5 minutes with: {_phrase(request)}")
+
+
+# handoff.33 (owner-authorized 2026-10-19): for projects in "owner" mode the owner's one
+# text is the CTO's plan in a few plain lines, answered "yes" in its own thread within 12
+# hours. The owner's number, the same DM, a native in-thread reply to that exact text, no
+# forwarding and single use still bind the exact plan, whose bytes stay in the receipt.
+PLAN_MAX_AGE = 12 * 3600
+PLAN_REPLIES = ("yes", "y", "go ahead", "yes go ahead", "start", "yes start",
+                "approve", "approved")
+PLAN_TEXT_MAX = 700
+WEB_SUFFIXES = (".html", ".css", ".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte")
+TITLES = {
+    "frontend": "Frontend", "backend": "Backend", "full_stack": "Full Stack",
+    "ai_ml": "AI/ML", "data_scientist": "Data Scientist", "data_engineer": "Data Engineer",
+    "devops": "DevOps", "integration": "Integrations", "security": "Security",
+}
+
+
+def _normalized(text: str) -> str:
+    return " ".join(text.casefold().replace(",", " ").split()).rstrip(".!")
+
+
+def _short(value: object, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def _files(paths: list[str], limit: int = 4) -> str:
+    names = list(paths[:limit]) + ([f"{len(paths) - limit} more"] if len(paths) > limit else [])
+    return ", ".join(names)
+
+
+def _team_lines(request: dict) -> list[str]:
+    """Who does what, by the same split the host gives the specialists (fresh_v1.host
+    work_items): one specialist owns every file; frontend takes the web files and
+    backend the rest."""
+    scope, specialists = list(request["scope"]), list(request["specialists"])
+    if len(specialists) == 1:
+        owned = {specialists[0]: scope}
+    elif set(specialists) == {"frontend", "backend"}:
+        owned = {"frontend": [p for p in scope if p.lower().endswith(WEB_SUFFIXES)],
+                 "backend": [p for p in scope if not p.lower().endswith(WEB_SUFFIXES)]}
+    else:
+        return [", ".join(TITLES.get(s, s) for s in specialists) + ": " + _files(scope)]
+    return [f"{TITLES.get(s, s)}: {_files(owned[s]) or 'no files'}" for s in specialists]
+
+
+def _plan_text(request: dict, plan_raw: bytes, project_name: str) -> str:
+    """The owner's one approval text: the goal, who does what on which files, and how to
+    say yes. Bound to the exact plan by the receipt, never by the wording."""
+    if type(plan_raw) is not bytes or len(plan_raw) > 32768 or _digest(plan_raw) != request["plan_sha256"]:
+        raise Denied("development challenge plan differs from canonical binding")
+    plan = json.loads(plan_raw)
+    if (type(plan) is not dict or any(plan.get(k) != request[k] for k in
+            ("project", "task_id", "repository", "spec_sha256"))):
+        raise Denied("development challenge plan identity mismatch")
+    if type(project_name) is not str or not project_name.strip():
+        raise Denied("development plan text needs the project name")
+    goal = str(plan.get("objective") or "").strip().split("\n")[0]
+    text = (f"Plan for {_short(project_name, 80)}: {_short(goal, 240)}\n"
+            + "".join(f"- {line}\n" for line in _team_lines(request)[:3])
+            + "Reply yes to start.")
+    if len(text) > PLAN_TEXT_MAX:
+        raise Denied("development plan text too large")
+    return text
+
+
+def _is_plan_receipt(receipt: dict) -> bool:
+    return "project_name" in receipt
+
+
+def _receipt_text(receipt: dict) -> str:
+    plan_raw = receipt["plan_raw"].encode() if "plan_raw" in receipt else None
+    if _is_plan_receipt(receipt):
+        if plan_raw is None:
+            raise Denied("plan approval receipt lacks its plan")
+        return _plan_text(receipt["request"], plan_raw, receipt["project_name"])
+    return _challenge_text(receipt["request"], plan_raw)
+
+
+def _receipt_lifetime(receipt: dict) -> int:
+    return PLAN_MAX_AGE if _is_plan_receipt(receipt) else MAX_AGE
+
+
+def _accepted_replies(receipt: dict) -> set[str]:
+    """Digests of the reply texts that approve: the exact phrase, and for a plan text the
+    plain replies (recorded normalized)."""
+    accepted = {receipt["phrase_sha256"]}
+    if _is_plan_receipt(receipt):
+        accepted |= {_digest(reply.encode()) for reply in PLAN_REPLIES}
+    return accepted
 
 
 def _event_time(value: object) -> float:
@@ -280,9 +388,8 @@ def _verify_evidence(root: Path, reference: str, grant: dict, expected: dict) ->
             or not isinstance(receipt.get("space_id"), str) or not receipt["space_id"]
             or not isinstance(receipt.get("message_id"), str) or not receipt["message_id"]
             or not isinstance(receipt.get("issued_at"), (int, float))
-            or receipt.get("expires_at") != receipt["issued_at"] + MAX_AGE
-            or receipt.get("challenge_text_sha256") != _digest(_challenge_text(request,
-                receipt["plan_raw"].encode() if "plan_raw" in receipt else None).encode())
+            or receipt.get("expires_at") != receipt["issued_at"] + _receipt_lifetime(receipt)
+            or receipt.get("challenge_text_sha256") != _digest(_receipt_text(receipt).encode())
             or receipt.get("phrase_sha256") != _digest(_phrase(request).encode())):
         raise Denied("challenge receipt does not bind canonical approval")
     checks = {"authenticated_sender": True, "same_dm": True, "fresh_event": True,
@@ -299,7 +406,7 @@ def _verify_evidence(root: Path, reference: str, grant: dict, expected: dict) ->
             or decision.get("native_reply_target") != receipt["message_id"]
             or decision.get("is_forward") is not False
             or decision.get("content_type") != "text"
-            or decision.get("content_sha256") != receipt["phrase_sha256"]
+            or decision.get("content_sha256") not in _accepted_replies(receipt)
             or decision.get("checks") != checks
             or grant.get("challenge_message_id") != receipt["message_id"]
             or not isinstance(decision.get("accepted_at"), (int, float))
@@ -565,23 +672,25 @@ class DevelopmentGrantIssuer:
                     or receipt.get("owner_id") != self.owner
                     or type(receipt.get("message_id")) is not str
                     or not 1 <= len(receipt["message_id"]) <= 200
-                    or receipt.get("expires_at") != receipt["issued_at"] + MAX_AGE
-                    or receipt.get("challenge_text_sha256") != _digest(_challenge_text(
-                        receipt["request"], receipt["plan_raw"].encode() if "plan_raw" in receipt else None).encode())
+                    or receipt.get("expires_at") != receipt["issued_at"] + _receipt_lifetime(receipt)
+                    or receipt.get("challenge_text_sha256") != _digest(_receipt_text(receipt).encode())
                     or receipt.get("phrase_sha256") != _digest(_phrase(receipt["request"]).encode())):
                 raise Denied("development send acknowledgement binding mismatch")
             result.append((None, {
                 "request": receipt["request"], "space_id": receipt["space_id"],
                 "message_id": receipt["message_id"],
                 "phrase": _phrase(receipt["request"]), "created_at": receipt["issued_at"],
-                "reference": reference,
+                "reference": reference, "expires_at": receipt["expires_at"],
             }))
         return result
 
     def stage(self, request: dict, *, space_id: str, peer_uid: int, plan_raw: bytes | None = None,
-              channel: str | None = None, title: str | None = None) -> dict:
+              channel: str | None = None, title: str | None = None,
+              project_name: str | None = None) -> dict:
         """channel: "imessage" sends today's challenge text; "alfred_os" records an offer
-        for the owner's passkey in Alfred OS and sends nothing. None: the root policy."""
+        for the owner's passkey in Alfred OS and sends nothing. None: the root policy,
+        except that a project in the delegation policy's "owner" mode gets the plan text
+        the owner asked for (handoff.33)."""
         if peer_uid != self.admin_uid or not isinstance(space_id, str) or not space_id:
             raise Denied("development approval staging requires protected administrator")
         if (request.get("schema") != "alfred.development-approval-request/1"
@@ -600,9 +709,9 @@ class DevelopmentGrantIssuer:
                 raise Denied("development challenge already attempted; reconciliation required")
             for path in self.root.glob("pending-*.json"):
                 prior = _read(self.root, path.name)
-                if self.clock() - prior["created_at"] > MAX_AGE:
-                    old_reference = path.stem.removeprefix("pending-")
-                    receipt = _read(self.root, f"challenge-{old_reference}.json")
+                old_reference = path.stem.removeprefix("pending-")
+                receipt = _read(self.root, f"challenge-{old_reference}.json")
+                if self.clock() - prior["created_at"] > _receipt_lifetime(receipt):
                     try:
                         _write_once(self.root, f"expired-{old_reference}.json", {
                             "schema": "alfred.development-challenge-expiry/1",
@@ -613,8 +722,7 @@ class DevelopmentGrantIssuer:
                         pass
                     path.unlink()
             if (any(self.root.glob("pending-*.json"))
-                    or any(self.clock() <= p["created_at"] + MAX_AGE
-                           for _, p in self._ack_pending())
+                    or any(self.clock() <= p["expires_at"] for _, p in self._ack_pending())
                     or owner_approval.open_offers(self.root, "development", self.clock())):
                 raise Denied("another development approval is pending")
             for path in self.root.glob("grant-*.json"):
@@ -628,12 +736,16 @@ class DevelopmentGrantIssuer:
                                             owner_uid=_policy_owner(self.environment))
             if delegation_permits(policy, request["project"]):
                 return self._delegate(request, space_id, policy)
-            if owner_approval.resolve_channel(channel, self.channel_policy,
-                                              owner_uid=_policy_owner(self.environment)) == "alfred_os":
+            plan_text = (plan_raw is not None and channel is None
+                         and plan_approval_requested(policy, request["project"]))
+            if not plan_text and owner_approval.resolve_channel(
+                    channel, self.channel_policy,
+                    owner_uid=_policy_owner(self.environment)) == "alfred_os":
                 return self._offer(request, space_id, plan_raw, title)
             challenge = uuid.uuid4().hex
             phrase = _phrase(request)
-            message = _challenge_text(request, plan_raw)
+            name = project_name or request["project"]
+            message = _plan_text(request, plan_raw, name) if plan_text else _challenge_text(request, plan_raw)
             if len(message) > 4000:
                 raise Denied("development approval challenge too large")
             issued_at = self.clock()
@@ -641,10 +753,11 @@ class DevelopmentGrantIssuer:
                 "schema": "alfred.development-challenge/1", "reference": challenge,
                 "request": request, "owner_id": self.owner, "space_id": space_id,
                 "message_id": "M" * 200, "issued_at": issued_at,
-                "expires_at": issued_at + MAX_AGE,
+                "expires_at": issued_at + (PLAN_MAX_AGE if plan_text else MAX_AGE),
                 "challenge_text_sha256": _digest(message.encode()),
                 "phrase_sha256": _digest(phrase.encode()),
-                **({"plan_raw": plan_raw.decode()} if plan_raw is not None else {})}
+                **({"plan_raw": plan_raw.decode()} if plan_raw is not None else {}),
+                **({"project_name": name} if plan_text else {})}
             attempt = {k: v for k, v in receipt.items() if k != "message_id"}
             attempt.update(schema="alfred.development-send-attempt/1",
                            delivery_state="uncertain_until_ack")
@@ -736,13 +849,20 @@ class DevelopmentGrantIssuer:
             content = event.get("content")
             now = self.clock()
             timestamp = _event_time(event.get("timestamp"))
+            text = content.get("text") if isinstance(content, dict) else None
+            # The exact phrase always; a plan text also takes a plain "yes" (recorded
+            # normalized, so the evidence names exactly which accepted reply it was).
+            reply = (text if text == pending["phrase"]
+                     else _normalized(text) if (type(text) is str and _is_plan_receipt(receipt)
+                                                and _normalized(text) in PLAN_REPLIES)
+                     else None)
             if (event.get("direction") != "inbound" or event.get("sender") != {"id": self.owner}
                     or event.get("space") != {"id": pending["space_id"], "type": "dm"}
                     or event.get("nativeIsForward") is not False
                     or not isinstance(event.get("messageId"), str)
                     or event["messageId"] == target
                     or not isinstance(content, dict) or content.get("type") != "text"
-                    or content.get("text") != pending["phrase"]
+                    or reply is None
                     or not receipt["issued_at"] <= now <= receipt["expires_at"]
                     or not receipt["issued_at"] - 5 <= timestamp <= now + 5):
                 raise Denied("development owner reply unverified")
@@ -760,7 +880,7 @@ class DevelopmentGrantIssuer:
                         "space_id": pending["space_id"], "direction": "inbound",
                         "native_reply_target": target, "is_forward": False,
                         "content_type": "text",
-                        "content_sha256": _digest(content["text"].encode()),
+                        "content_sha256": _digest(reply.encode()),
                         "sdk_event_timestamp": timestamp, "accepted_at": now,
                         "peer_uid": peer_uid, "checks": checks}
             # The decision record consumes this challenge before grant creation.
