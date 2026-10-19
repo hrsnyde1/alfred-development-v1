@@ -71,14 +71,15 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
     spec, plan = inputs.spec_decoder(inputs.spec_raw), json.loads(inputs.plan_raw)
     complexity = task_complexity(spec, plan, dispatch["specialists"])
     # Verified before the grant is claimed, so a missing or altered snapshot
-    # leaves the owner's grant unused.
-    skills = team_skills.for_plan(plan, team_skills_root, owner=team_skills_owner)
+    # leaves the owner's grant unused. Each specialist gets only its share.
+    skills = team_skills.for_specialists(plan, spec, dispatch["specialists"],
+                                         team_skills_root, owner=team_skills_owner)
     # Owner-approved Alfred OS files, when a verified snapshot exists; otherwise the
     # built-in profile exactly as before. Read once, before the grant is claimed.
-    budget = MAX_PRACTICES - len(json.dumps(skills, ensure_ascii=False).encode())
     profiles = {s: team_snapshot.profile(
                     s, agent_profiles.identity(BUILTIN_PROFILE.get(s, s)),
-                    root=team_snapshot_root, budget=budget)
+                    root=team_snapshot_root,
+                    budget=MAX_PRACTICES - len(json.dumps(skills[s], ensure_ascii=False).encode()))
                 for s in dispatch["specialists"]}
     identities = {s: text for s, (text, _) in profiles.items()}
     team_records = {s: record for s, (_, record) in profiles.items()}
@@ -127,7 +128,7 @@ def execute_approved(inputs: GatewayInputs, *, project: str, task_id: str,
 
 def _execute_claimed(inputs, dispatch, assignments, choices, worktree_root,
                      state_root, project, task_id, broker, checks, authority, baseline_revision,
-                     skills=(), fix_round=0, identities=None, team_records=None):
+                     skills=None, fix_round=0, identities=None, team_records=None):
     state = AssignmentStore(state_root / project / task_id)
     # A single final branch carries every completed developer commit to QA.
     final = create_worktree(inputs.repository, worktree_root, project, task_id,
@@ -146,7 +147,8 @@ def _execute_claimed(inputs, dispatch, assignments, choices, worktree_root,
         worktree = create_worktree(inputs.repository, worktree_root, project, task_id,
                                    item["id"], _git(final, "rev-parse", "HEAD"))
         worker = DeveloperWorker(broker, objective=item["objective"],
-                                 checks=checks or [CHECK], fallback=fallback, skills=skills,
+                                 checks=checks or [CHECK], fallback=fallback,
+                                 skills=(skills or {}).get(item["specialist"], ()),
                                  identity=(identities or {}).get(item["specialist"], ""),
                                  team_profile=(team_records or {}).get(item["specialist"],
                                                                         team_snapshot.BUILTIN))
