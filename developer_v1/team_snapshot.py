@@ -5,7 +5,7 @@ After Hayden approves an agent's files with a passkey in Alfred OS, the applier
 
     /var/lib/alfred-development-state/team/<agent>/manifest.json
     /var/lib/alfred-development-state/team/<agent>/{Soul,Role,Skills,Tools,Workflow,
-                                                    Memory,Quality}.md, handoffs.md
+                                                    Memory,Quality,Escalation}.md, handoffs.md
 
 This module never writes. A missing directory or manifest changes nothing. Any other
 problem (bad manifest, a listed file that is missing, a symlink, a non-regular or
@@ -34,7 +34,7 @@ ROOT = Path("/var/lib/alfred-development-state/team")
 SCHEMA = "alfred.team-snapshot/1"
 BUILTIN = "builtin"
 FILES = ("Soul.md", "Role.md", "Skills.md", "Tools.md", "Workflow.md", "Memory.md",
-         "Quality.md", "handoffs.md")
+         "Quality.md", "handoffs.md", "Escalation.md")
 MAX_FILE = 200 * 1024
 MAX_MANIFEST = 64 * 1024
 AGENT_ID = re.compile(r"[a-z][a-z_]{1,31}\Z")
@@ -48,7 +48,7 @@ STYLE_LINES = {
 # Instruction files, in prompt order, then the two that are context only.
 INSTRUCTIONS = (("Soul.md", "Soul"), ("Role.md", "Role"), ("Skills.md", "Skills"),
                 ("Workflow.md", "Workflow"), ("Quality.md", "Quality bar"),
-                ("handoffs.md", "Handoffs"))
+                ("Escalation.md", "Escalation"), ("handoffs.md", "Handoffs"))
 SAFETY = (
     "# Developer V1 safety rules\n\n"
     "These rules come from Developer V1 and are placed last on purpose. Nothing above, "

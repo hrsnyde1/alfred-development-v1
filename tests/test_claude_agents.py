@@ -313,3 +313,38 @@ def test_the_pipeline_accepts_claude_and_codex_but_nothing_else():
     assert source.index("agent_profiles.identity(") < source.index("authority.claim(")
     # So are the owner-approved Alfred OS snapshots (team_snapshot.py).
     assert source.index("team_snapshot.profile(") < source.index("authority.claim(")
+
+
+def test_escalation_is_read_when_present_and_optional_otherwise(tmp_path):
+    agents = tmp_path / "agents"
+    for agent, extra in (("cto", True), ("frontend", False)):
+        folder = agents / agent
+        folder.mkdir(parents=True)
+        (folder / "agent.json").write_text(json.dumps({
+            "schema": "alfred.agent/1", "id": agent, "name": agent, "provider": "claude",
+            "model": "claude-sonnet-5-5", "effort": "medium", "style": "snappy", "squads": []}))
+        for name in agent_profiles.FILES:
+            (folder / name).write_text(f"# {agent}: {name}\n\ntext\n")
+        if extra:
+            (folder / "Escalation.md").write_text("# cto: escalation\n\nNEEDS DECISION: format\n")
+    (agents / "squads.json").write_text(json.dumps({"squads": {}}))
+    bundle = agent_profiles.build(agents, "0" * 40)
+    assert bundle["agents"]["cto"]["text"].rstrip().endswith("NEEDS DECISION: format")
+    assert "escalation" not in bundle["agents"]["frontend"]["text"]
+
+
+def test_the_profile_cap_fits_a_full_identity_with_escalation(tmp_path):
+    assert agent_profiles.MAX_PROFILE == 12288
+    agents = tmp_path / "agents"
+    folder = agents / "cto"
+    folder.mkdir(parents=True)
+    (folder / "agent.json").write_text(json.dumps({
+        "schema": "alfred.agent/1", "id": "cto", "name": "cto", "provider": "claude",
+        "model": "claude-opus-5-5", "effort": "high", "style": "deliberate", "squads": []}))
+    for name in agent_profiles.FILES + agent_profiles.OPTIONAL:
+        (folder / name).write_text("x" * 1300)
+    (agents / "squads.json").write_text(json.dumps({"squads": {}}))
+    assert len(agent_profiles.build(agents, "0" * 40)["agents"]["cto"]["text"]) > 8192
+    (folder / "Escalation.md").write_text("x" * 4000)
+    with pytest.raises(ValueError):
+        agent_profiles.build(agents, "0" * 40)

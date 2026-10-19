@@ -57,7 +57,7 @@ def test_valid_snapshot_composes_in_the_contract_order(tmp_path):
     assert record == digest
     order = ["BUILT-IN PROFILE", STYLE_LINES["Balanced"], "Soul.md marker", "Role.md marker",
              "Skills.md marker", "Workflow.md marker", "Quality.md marker",
-             "handoffs.md marker", "Memory.md marker", "Tools.md marker", SAFETY]
+             "Escalation.md marker", "handoffs.md marker", "Memory.md marker", "Tools.md marker", SAFETY]
     positions = [text.index(marker) for marker in order]
     assert positions == sorted(positions)
     assert text.endswith(SAFETY)
@@ -370,3 +370,10 @@ def test_cto_plan_records_the_approved_cto_snapshot(world, tmp_path):
 def test_cto_plan_without_snapshot_is_unchanged(world, tmp_path):
     world.p["team_snapshots"] = str(tmp_path / "absent")
     assert "team_profile" not in _plan(world)
+
+
+def test_a_snapshot_without_escalation_still_loads(tmp_path):
+    files = {k: v for k, v in FILES.items() if k != "Escalation.md"}
+    digest = write_snapshot(tmp_path, files=files)
+    text, record = profile("backend", "built-in", root=tmp_path)
+    assert record == digest and "Escalation" not in text

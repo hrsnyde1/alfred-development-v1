@@ -172,6 +172,10 @@ run handoff33 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_plan_appr
   tests/test_auto_merge_undo.py tests/test_delegated_development_approval.py \
   tests/test_independent_qa.py tests/test_dev_squads.py --junitxml="$OUT/handoff33.xml"
 
+# handoff.35: agent identities may include Escalation.md.
+run handoff35 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_claude_agents.py tests/test_team_snapshot.py \
+  tests/test_development_handoff35_upgrade.py --junitxml="$OUT/handoff35.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"

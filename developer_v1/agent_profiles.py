@@ -25,9 +25,11 @@ SCHEMA = "alfred.agent-profiles/1"
 # Prompt order: who the agent is first, then how it works, then how it hands off.
 FILES = ("Soul.md", "Role.md", "Skills.md", "Tools.md", "Workflow.md", "Quality.md",
          "Handoff.md", "Memory.md")
+# Read when an agent has it (the CTO first, 2026-10-19); appended after FILES.
+OPTIONAL = ("Escalation.md",)
 FIELDS = {"schema", "id", "name", "provider", "model", "effort", "style", "squads"}
 AGENT_ID = re.compile(r"^[a-z][a-z_]{1,31}$")
-MAX_PROFILE = 8192
+MAX_PROFILE = 12288
 MAX_BUNDLE = 262144
 
 
@@ -81,7 +83,8 @@ def build(agents_dir: Path, commit: str) -> dict:
             raise ValueError("bad agent.json: " + folder.name)
         if not AGENT_ID.match(meta["id"]):
             raise ValueError("bad agent id: " + folder.name)
-        text = "\n\n".join((folder / name).read_text().strip() for name in FILES)
+        names = FILES + tuple(n for n in OPTIONAL if (folder / n).is_file())
+        text = "\n\n".join((folder / name).read_text().strip() for name in names)
         if len(text.encode()) > MAX_PROFILE:
             raise ValueError("profile too large: " + folder.name)
         agents[meta["id"]] = {"card": meta, "text": text}
