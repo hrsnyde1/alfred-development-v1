@@ -1097,6 +1097,32 @@ def test_cto_summary_evidence_is_bound_to_exact_plan_and_bounded_before_send(wor
     assert not list(world.grants.glob("execution-*.json"))
 
 
+def test_planning_waits_for_a_gateway_run_that_holds_the_lock(world):
+    # handoff.40: demo-site T-0010 (2026-10-19) started planning 3 ms after a Gateway
+    # timer run took the lock, failed with GatewayBusy and was held.
+    import threading
+
+    from alfred.gateway.dispatcher import gateway_lock
+
+    world.submit()
+    taken, release = threading.Event(), threading.Event()
+
+    def timer_run():
+        with gateway_lock(world.gateway.gateway_dir):
+            taken.set()
+            release.wait(1.0)
+
+    holder = threading.Thread(target=timer_run)
+    holder.start()
+    taken.wait(5)
+    try:
+        context = role.prepare_plan(world.job, world.p, remote_main=world.main, fetch=False)
+    finally:
+        release.set()
+        holder.join()
+    assert context["specialists"] == ["backend"]
+
+
 def test_oversized_cto_plan_evidence_is_refused_before_any_send(world):
     from developer_v1.approval_transition import approval_request
     from developer_v1.owner_grants import _bytes
