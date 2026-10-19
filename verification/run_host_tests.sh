@@ -181,6 +181,11 @@ run handoff34 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_repo_inte
 run handoff35 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_claude_agents.py tests/test_team_snapshot.py \
   tests/test_development_handoff35_upgrade.py --junitxml="$OUT/handoff35.xml"
 
+# handoff.36: the reviewed workforce identities, with the shared charter, reach the agents.
+run handoff36 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_claude_agents.py tests/test_team_snapshot.py \
+  tests/test_repo_intelligence.py tests/test_fresh_v1.py tests/test_development_handoff36_upgrade.py \
+  --junitxml="$OUT/handoff36.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"

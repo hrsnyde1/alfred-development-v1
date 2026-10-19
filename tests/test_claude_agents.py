@@ -263,10 +263,30 @@ def test_the_bundle_matches_its_source_files(tmp_path):
     for agent, profile in bundle["agents"].items():
         (agents / agent).mkdir(parents=True)
         (agents / agent / "agent.json").write_text(json.dumps(profile["card"]))
-        for name, part in zip(agent_profiles.FILES, profile["text"].split("\n\n# ")):
+        parts = profile["text"].split("\n\n# ")
+        names = (agent_profiles.FILES + agent_profiles.OPTIONAL)[:len(parts)]
+        assert len(names) == len(parts)
+        for name, part in zip(names, parts):
             (agents / agent / name).write_text(part if part.startswith("# ") else "# " + part)
     (agents / "squads.json").write_text(json.dumps({"squads": bundle["squads"]}))
+    if "charter" in bundle:
+        (agents / agent_profiles.CHARTER).write_text(bundle["charter"])
     assert agent_profiles.build(agents, bundle["source"]["commit"]) == bundle
+
+
+# handoff.36: the bundle the owner reviewed in alfred-team-skills PRs #11-#25.
+TEAM_SKILLS_COMMIT = "3f89e281f5311c998eb1254431b6ef4590d1747f"
+
+
+def test_the_release_bundle_is_the_reviewed_workforce_with_its_charter():
+    bundle = json.loads(agent_profiles.BUNDLE.read_text())
+    assert bundle["source"]["commit"] == TEAM_SKILLS_COMMIT
+    assert bundle["charter"].startswith("# Workforce charter")
+    for agent in AGENTS:
+        text = agent_profiles.identity(agent)
+        assert text.startswith(bundle["charter"] + "\n\n# ")
+        assert text.count("# Workforce charter") == 1 and "NEEDS DECISION" in text
+        assert len(bundle["agents"][agent]["text"].encode()) <= agent_profiles.MAX_PROFILE
 
 
 def _profiles(tmp_path, charter=None):
