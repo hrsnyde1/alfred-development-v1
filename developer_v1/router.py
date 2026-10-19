@@ -250,7 +250,19 @@ CORE_ROUTES = (
 
 
 def select_specialists(spec: dict, plan: dict) -> list[str]:
-    """Conservative, evidence-aware CTO routing proposal; grant must permit it."""
+    """Conservative, evidence-aware CTO routing proposal; grant must permit it.
+
+    handoff.39: a plan that records its staffing ("specialists", written by the plan
+    step and bound by the owner's grant through the plan digest) is the decision, so
+    the approval request, the developer dispatch and the plan step agree. Plans made
+    before handoff.39 carry no record and route by keyword exactly as before.
+    """
+    if "specialists" in plan:
+        planned = plan["specialists"]
+        if (type(planned) is not list or not planned or len(set(planned)) != len(planned)
+                or any(type(s) is not str or s not in SPECIALISTS for s in planned)):
+            raise Denied("invalid planned specialists")
+        return list(planned)
     sections = spec.get("sections") or {}
     # Scope often lists exclusions (for example "no backend or auth"). Route from
     # the requested outcome, then use repository evidence as a separate check.

@@ -1020,6 +1020,17 @@ def test_planning_fetches_current_main_without_resetting_canonical_checkout(worl
     assert not list(world.grants.glob("grant-*.json"))
 
 
+def test_the_owner_s_grant_binds_the_staffing_the_plan_recorded(world):
+    # handoff.39: one staffing record from the plan step through approval and dispatch.
+    world.submit()
+    world.tick()
+    plan_path = world.gateway.gateway_dir / "cto-plans" / f"{PROJECT}-{world.job['task_id']}.json"
+    assert json.loads(plan_path.read_bytes())["specialists"] == ["backend"]
+    world.approve_development()
+    grants = [json.loads(p.read_bytes()) for p in world.grants.glob("grant-*.json")]
+    assert grants and all(g.get("specialists") == ["backend"] for g in grants)
+
+
 def test_approved_plan_baseline_is_used_even_without_caller_override(world):
     world.submit()
     world.tick()

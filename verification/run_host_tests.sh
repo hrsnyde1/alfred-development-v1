@@ -190,6 +190,10 @@ run handoff36 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_claude_ag
 run handoff37 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_staffing.py tests/test_fresh_v1.py \
   tests/test_development_handoff37_upgrade.py --junitxml="$OUT/handoff37.xml"
 
+# handoff.39: the plan's recorded staffing is what approval and dispatch route by.
+run handoff39 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_staffing.py tests/test_fresh_v1.py \
+  tests/test_developer_v1.py tests/test_development_handoff39_upgrade.py --junitxml="$OUT/handoff39.xml"
+
 # handoff.38: a refused plan step texts the owner once, with a fixed reason.
 run handoff38 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_plan_refusal_notice.py \
   tests/test_fix_loop.py tests/test_fresh_v1.py tests/test_development_handoff38_upgrade.py \

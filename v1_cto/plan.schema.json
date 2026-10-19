@@ -161,6 +161,12 @@
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
+    "specialists": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z][a-z_]{1,31}$"}
+    },
     "team_skills": {
       "type": "object",
       "required": ["library_commit", "role", "skills"],
