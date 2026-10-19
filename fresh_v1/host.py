@@ -964,8 +964,11 @@ worker_main(sys.argv[1:])"""
                 return True
         if kind == "development":
             for path in grants.glob("pending-*.json"):
-                pending = json.loads(read_owned(path, self.uids["alfred"]))
-                if now <= pending["created_at"] + 300:
+                # Each text's own window: 5 minutes, or 12 hours for a plan text (handoff.33).
+                reference = path.stem.removeprefix("pending-")
+                receipt = json.loads(read_owned(
+                    grants / f"challenge-{reference}.json", self.uids["alfred"]))
+                if now <= receipt["expires_at"]:
                     return True
             return False
         for path in grants.glob("publication-pending-*.json"):
@@ -1403,13 +1406,26 @@ def poll(policy_path=POLICY):
                 )
             )
             if (
-                route.get("schema") != "alfred.confirmed-request-route/1"
-                or route.get("project") != project
+                route.get("project") != project
                 or route.get("request_id") != row["request_id"]
                 or route.get("owner_id") != intake_config["owner_sender_id"]
                 or route.get("sidecar_uid") != pwd.getpwnam("alfredphoton").pw_uid
-                or route.get("confirmation_event_id") == route.get("request_event_id")
                 or not route.get("space_id")
+                or not route.get("request_event_id")
+            ):
+                raise Held("canonical route evidence mismatch")
+            if route.get("schema") == "alfred.direct-request-route/1":
+                # handoff.33: filed with no preview; the owner's yes to the CTO plan text
+                # is the approval, so nothing runs before it.
+                if (
+                    route.get("approval") != "owner_plan_reply"
+                    or "confirmation_event_id" in route
+                    or "native_reply_target" in route
+                ):
+                    raise Held("canonical route evidence mismatch")
+            elif (
+                route.get("schema") != "alfred.confirmed-request-route/1"
+                or route.get("confirmation_event_id") == route.get("request_event_id")
                 or not route.get("confirmation_event_id")
                 or not route.get("native_reply_target")
             ):

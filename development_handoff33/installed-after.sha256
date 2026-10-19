@@ -1,0 +1,7 @@
+099907e3d45b0f73aa7c879a86b61badec780d076c6ca0766470ccf995aace1c  /etc/alfred-development/delegation.json
+25c1ed5fbf94e34caf96e51c4efeec14092eba6103ea00924d501163a5161886  /opt/alfred-developer-v1/developer_v1/owner_grants.py
+9d4b0f707eee290baa8935706a8922cd24684a03e6b95130b95546e761ecd40b  /opt/alfred-developer-v1/developer_v1/trusted_intake_development.py
+9d4b0f707eee290baa8935706a8922cd24684a03e6b95130b95546e761ecd40b  /usr/local/lib/alfred-v1.1/trusted_intake.py
+c12f8110346c4ebeac2dc52bd5661133244ea6d75be5495474ab5b769f1aa266  /opt/alfred-independent-qa-v1/independent_qa/worker.py
+a751647808c2f44254c559a9129e619a09f8a6d3bc675ce623d7749631f44950  /usr/local/lib/alfred-fresh-v1/fresh_v1/host.py
+27d5dc7efe8499be023ba139a78d53799e27f6446e37ec97347900e5bd64c79d  /usr/local/lib/alfred-fresh-v1/fresh_v1/squads.py

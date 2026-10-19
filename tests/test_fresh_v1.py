@@ -414,8 +414,10 @@ class World(host.Host):
         )
 
         def develop(**kwargs):
+            # Never the host's own team-skills library (root-owned, delivered live).
             return real_execute(
-                **kwargs, broker=MultiplyBroker(), grant_environment="staging"
+                **kwargs, broker=MultiplyBroker(), grant_environment="staging",
+                team_skills_root=self.root / "no-team-skills",
             )
 
         def independent_model(config, context):
@@ -488,6 +490,17 @@ class World(host.Host):
                 )
             )
             if stage == "plan":
+                # Planning never pins the host's own team-skills library either.
+                real_attach = role.team_skills.attach
+                stack.enter_context(
+                    patch.object(
+                        role.team_skills,
+                        "attach",
+                        lambda plan, spec, specialists, *a, **kw: real_attach(
+                            plan, spec, specialists, self.root / "no-team-skills"
+                        ),
+                    )
+                )
                 original = role.prepare_plan
                 stack.enter_context(
                     patch.object(

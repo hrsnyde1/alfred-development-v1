@@ -192,9 +192,25 @@ def load_authority(registry_path: Path, gateway_state: Path, grant_root: Path,
     return plan, grant, projects[0], plan_sha, digest(spec_bytes), grant_sha
 
 
+# handoff.33: a plan text (its receipt names the project, valid 12 hours) is approved by
+# a plain reply, recorded normalized; the same list as developer_v1.owner_grants.
+PLAN_MAX_AGE = 12 * 3600
+PLAN_REPLIES = ("yes", "y", "go ahead", "yes go ahead", "start", "yes start",
+                "approve", "approved")
+
+
+def accepted_replies(challenge: dict) -> set:
+    accepted = {challenge.get("phrase_sha256")}
+    if ("project_name" in challenge and type(challenge.get("issued_at")) in (int, float)
+            and challenge.get("expires_at") == challenge["issued_at"] + PLAN_MAX_AGE):
+        accepted |= {digest(reply.encode()) for reply in PLAN_REPLIES}
+    return accepted
+
+
 def owner_reply_decision(grant_root: Path, ref: str, grant: dict, grant_sha: str,
                          issuance: dict, expected_request: dict) -> bool:
-    """The owner's native in-thread iMessage reply approved this exact request."""
+    """The owner's native in-thread iMessage reply approved this exact request: the
+    exact phrase, or a plain yes to the plan text (handoff.33)."""
     challenge, challenge_sha = read_json(grant_root / f"challenge-{ref}.json")
     decision, decision_sha = read_json(grant_root / f"decision-{ref}.json")
     checks = {"authenticated_sender", "same_dm", "fresh_event", "native_direct_reply",
@@ -206,7 +222,8 @@ def owner_reply_decision(grant_root: Path, ref: str, grant: dict, grant_sha: str
             decision.get("sender_id") == challenge.get("owner_id") and
             decision.get("space_id") == challenge.get("space_id") and
             decision.get("native_reply_target") == challenge.get("message_id") and
-            decision.get("content_sha256") == challenge.get("phrase_sha256") and
+            type(challenge.get("phrase_sha256")) is str and
+            decision.get("content_sha256") in accepted_replies(challenge) and
             decision.get("owner_event_id") == grant.get("owner_event_id") and
             decision.get("direction") == "inbound" and decision.get("is_forward") is False and
             decision.get("content_type") == "text" and
@@ -237,6 +254,10 @@ def delegated_decision(grant_root: Path, ref: str, grant: dict, grant_sha: str,
             set(policy) - {"merge_approval"} == {"schema", "development_approval",
                                                  "publication_approval"} and
             type(development) is dict and development.get("enabled") is True and
+            # "owner" (handoff.33): the owner approves each plan, so a policy-decided
+            # record is never valid for it.
+            set(development) - {"mode"} == {"enabled", "projects"} and
+            development.get("mode", "delegated") == "delegated" and
             type(development.get("projects")) is list and
             expected_request["project"] in development["projects"] and
             grant.get("delegation_sha256") == record_sha and

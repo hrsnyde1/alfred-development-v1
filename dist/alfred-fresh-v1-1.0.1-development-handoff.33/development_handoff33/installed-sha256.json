@@ -1,0 +1,9 @@
+{
+  "/etc/alfred-development/delegation.json": "5e0b0a62de362736695e8c2f46bf04c1d61c2116902ef5d11f1442e7edca05bc",
+  "/opt/alfred-developer-v1/developer_v1/owner_grants.py": "cca55707f1854b9fdb4a5698f2672af33f1400e478033953869dd512b3ad7c11",
+  "/opt/alfred-developer-v1/developer_v1/trusted_intake_development.py": "0bc7230ae993046f68993f2b089528d32d8fb12dc4ca42709ceb261251954bc4",
+  "/usr/local/lib/alfred-v1.1/trusted_intake.py": "0bc7230ae993046f68993f2b089528d32d8fb12dc4ca42709ceb261251954bc4",
+  "/opt/alfred-independent-qa-v1/independent_qa/worker.py": "5aa8aaa3bb7c84371a6012c2d56525b200f3ae4db936ee9d3749e13b600fe2e1",
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/host.py": "a97095c318a35224d777b2f1ffa8d5031a48d37ba72576859efd83f8616cd818",
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/squads.py": "8c18094ab8090ebbb76d8b6074cc671debef06a23396af34fa66889a5416f1e8"
+}
