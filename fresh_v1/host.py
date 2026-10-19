@@ -19,8 +19,8 @@ import tempfile
 import time
 from pathlib import Path
 
-from .diagnostics import WorkerFailure, failure, worker_failure
-from .handoffs import Held, advance, undo, write_once
+from .diagnostics import PLAN_REFUSALS, WorkerFailure, failure, worker_failure
+from .handoffs import Held, advance, once, undo, write_once
 from .protected import identity, protected_json
 
 POLICY = Path("/etc/alfred-fresh-v1/policy.json")
@@ -649,6 +649,19 @@ worker_main(sys.argv[1:])"""
                 "space_id": job["space_id"],
                 "summary": goal[0] if goal else "the approved change",
                 "findings": list(findings)[:3],
+            }
+        )
+
+    def notify_plan_refused(self, job, reason):
+        """handoff.38: one plain-language text when the plan step refused the task.
+        Only the fixed reason travels; Intake words the text itself."""
+        return self.intake(
+            {
+                "op": "notify_owner_plan_refused",
+                "project": job["project"],
+                "task_id": job["task_id"],
+                "space_id": job["space_id"],
+                "reason": reason,
             }
         )
 
@@ -1343,6 +1356,39 @@ VERDICT_HOLDS = frozenset({
 })
 
 
+def plan_refusal(directory, job, host):
+    """handoff.38: a task the plan step refused tells the owner why, exactly once.
+
+    Only a recorded refusal category (never exception text) is read. The notice is
+    attempted at most once: a send that did not answer is never repeated, and no
+    outcome changes the task, which stays held with its evidence untouched."""
+    path = directory / "plan.failure.json"
+    try:
+        evidence = json.loads(path.read_bytes())
+    except (OSError, ValueError):
+        return None
+    if (
+        type(evidence) is not dict
+        or evidence.get("stage") != "plan"
+        or evidence.get("phase") != "plan_refusal"
+        or evidence.get("category") not in set(PLAN_REFUSALS.values())
+    ):
+        return None
+    try:
+        # A paused or changed activation sends nothing and records no attempt.
+        host.guard()
+    except (Held, OSError, ValueError):
+        return None
+    try:
+        return once(
+            directory,
+            "plan-refusal-notice",
+            lambda: host.notify_plan_refused(job, evidence["category"]),
+        )
+    except (Held, OSError, ValueError):
+        return None
+
+
 def poll(policy_path=POLICY):
     require_root()
     policy, _ = protected_json(policy_path)
@@ -1472,8 +1518,11 @@ def poll(policy_path=POLICY):
                 held_failure = held_failure or failed[0].name.removesuffix(
                     ".failure.json"
                 )
+                plan_refusal(directory, job, host)
                 continue
             result = advance(directory, job, host)
+            if result["state"] == "held":
+                plan_refusal(directory, job, host)
             if result["state"] == "complete":
                 write_once(directory / "complete.json", result)
             if result["state"] in ("awaiting_development_approval", "awaiting_publication_approval"):

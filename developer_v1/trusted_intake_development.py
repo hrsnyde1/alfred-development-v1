@@ -300,6 +300,25 @@ class IntakeGate:
             except (OSError, ValueError, TimeoutError) as exc:
                 raise IntakeRefused("stuck_notice_unavailable") from exc
             return {"state": "sent", "message_id": message_id}
+        if op == "notify_owner_plan_refused":
+            # handoff.38: the plan step refused a filed task. One fixed text per
+            # reason, root only; no exception text or model output ever reaches it.
+            if peer_uid != 0 or self.preview_sender is None:
+                raise IntakeRefused("wrong_peer")
+            project, space_id = request.get("project"), request.get("space_id")
+            task_id, reason = request.get("task_id"), request.get("reason")
+            if (type(project) is not str or type(space_id) is not str or not space_id
+                    or type(task_id) is not str
+                    or re.fullmatch(r"T-[0-9]{4}", task_id) is None
+                    or type(reason) is not str or reason not in PLAN_REFUSAL_TEXT):
+                raise IntakeRefused("invalid_plan_refusal_notice")
+            text = _plan_refusal_text(
+                self._display_name(project) if self.registry_path else project, task_id, reason)
+            try:
+                message_id = self.preview_sender(space_id, text)
+            except (OSError, ValueError, TimeoutError) as exc:
+                raise IntakeRefused("plan_refusal_notice_unavailable") from exc
+            return {"state": "sent", "message_id": message_id}
         if op == "revoke_development_grant":
             if peer_uid != 0 or self.development_issuer is None:
                 raise IntakeRefused("wrong_peer")
@@ -729,6 +748,26 @@ def _stuck_text(project: str, summary: str, findings: list[str]) -> str:
             "The team tried 3 rounds of fixes, but it still isn't passing review:\n"
             f"{problems}\n"
             "Nothing was published. Tell me what to change, or send a new request.")
+
+
+# handoff.38: why a filed task was not planned, in the owner's words. Fixed texts only.
+PLAN_REFUSAL_TEXT = {
+    "clarification_required": "needs a clearer request: which files or which part should "
+                              "change? Send it again with that detail.",
+    "project_outside_policy": "can't be planned: this project isn't set up for automatic "
+                              "development.",
+    "registered_main_unavailable": "is on hold: I couldn't read the project's main branch "
+                                   "on GitHub. Send it again in a little while.",
+    "main_moved": "is on hold: the main branch changed while I was planning. Send it again.",
+    "planning_tree_unavailable": "can't be planned: the repository is too large or has "
+                                 "files I can't plan from safely.",
+}
+
+
+def _plan_refusal_text(project: str, task_id: str, reason: str) -> str:
+    name = " ".join(project.split())
+    name = name if len(name) <= 80 else name[:79] + "…"
+    return f"{task_id} ({name}) {PLAN_REFUSAL_TEXT[reason]} Nothing was started."
 
 
 def _preview_text(utterance: str, draft: dict[str, Any], digest: str, *, project: str) -> str:
