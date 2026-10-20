@@ -105,6 +105,9 @@ def test_pins_agree_with_handoff_37_and_this_release():
     before = json.loads((ROOT / "development_handoff38/installed-sha256.json").read_bytes())
     assert before == transaction.BASE
     after = (ROOT / "development_handoff38/installed-after.sha256").read_text().splitlines()
+    # handoff.42 supersedes handoff.38 and changed one of its files on main, so compare
+    # with the files handoff.38 actually shipped.
+    shipped = ROOT / "dist/alfred-fresh-v1-1.0.1-development-handoff.38"
     assert sorted(after) == sorted(
-        upgrade.digest((ROOT / source).read_bytes()) + "  " + name
+        upgrade.digest((shipped / source).read_bytes()) + "  " + name
         for name, source in transaction.DESTINATIONS.items())

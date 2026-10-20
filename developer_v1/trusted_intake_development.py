@@ -754,8 +754,10 @@ def _stuck_text(project: str, summary: str, findings: list[str]) -> str:
 PLAN_REFUSAL_TEXT = {
     "clarification_required": "needs a clearer request: which files or which part should "
                               "change? Send it again with that detail.",
-    "project_outside_policy": "can't be planned: this project isn't set up for automatic "
-                              "development.",
+    # handoff.42: also a task the request marked high risk (demo-site T-0014).
+    "project_outside_policy": "can't be planned: automatic development runs only low-risk "
+                              "changes to projects set up for it. If this one is low risk, "
+                              "ask me to file it again marked low risk.",
     "registered_main_unavailable": "is on hold: I couldn't read the project's main branch "
                                    "on GitHub. Send it again in a little while.",
     "main_moved": "is on hold: the main branch changed while I was planning. Send it again.",
