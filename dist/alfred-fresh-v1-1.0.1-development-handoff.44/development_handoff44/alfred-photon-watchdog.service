@@ -1,0 +1,25 @@
+[Unit]
+Description=Alfred: restart the Photon sidecar when iMessage inbound has stalled, or when the owner asks
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 -I -B -c 'import sys; sys.path.insert(0, "/usr/local/lib/alfred-fresh-v1"); from fresh_v1.photon_watchdog import main; sys.exit(main())'
+SyslogIdentifier=alfred-photon-watchdog
+StateDirectory=alfred-photon-watchdog
+# 0711: the bridges (user alfred) may read stalls.json (0644) but list nothing; state.json stays 0600.
+StateDirectoryMode=0711
+# Owner requests (alfred-photon-requests.path): read, then removed. Ignored if the spool is missing.
+ReadWritePaths=-/var/lib/alfred-photon-requests
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+IPAddressDeny=any
+SystemCallArchitectures=native
+TimeoutStartSec=300

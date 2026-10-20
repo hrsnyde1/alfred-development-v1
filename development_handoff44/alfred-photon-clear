@@ -1,0 +1,90 @@
+#!/usr/bin/python3 -I
+"""Ask the Photon watchdog to clear a stalled iMessage inbound (handoff.44).
+
+Alfred runs this when Hayden asks ("texts aren't getting through, clear the stall").
+It only drops a small request file into the watchdog's spool; the root watchdog reads
+it within seconds, checks its own limits, restarts alfred-photon.service (which also
+restarts Hermes) and records the answer in the stall list.
+
+    alfred-photon-clear status            # is inbound OK, and the open and recent stalls
+    alfred-photon-clear clear [--delay N] # restart Photon now (N <= 30 seconds' wait first)
+    alfred-photon-clear delete <stall-id> # remove one stall from the list (clears it if open)
+"""
+
+import argparse
+import json
+import os
+import secrets
+import sys
+import time
+from pathlib import Path
+
+REQUESTS = Path("/var/lib/alfred-photon-requests")
+STALLS = Path("/var/lib/alfred-photon-watchdog/stalls.json")
+
+
+def when(epoch):
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(epoch)) if epoch else "?"
+
+
+def status() -> int:
+    try:
+        ledger = json.loads(STALLS.read_bytes())
+    except (OSError, ValueError):
+        print("No stall list yet: the Photon watchdog has not run (or handoff.44 is not installed).")
+        return 1
+    print("Inbound: %s (checked %s)" % (ledger.get("inbound", "unknown"), when(ledger.get("checked_at"))))
+    stalls = ledger.get("stalls") or []
+    if not stalls:
+        print("No stalls on the list.")
+    for s in stalls[:10]:
+        legs = "; ".join("%s: %s" % kv for kv in (s.get("legs") or {}).items())
+        print("- %s  %s since %s, %s%s  %s" % (
+            s.get("id"), s.get("kind"), when(s.get("started_at")), s.get("status"),
+            " by " + s["cleared_by"] if s.get("cleared_by") else "", legs))
+    for a in (ledger.get("answers") or [])[:3]:
+        print("Last request: %s %s -> %s (%s)" % (a.get("action"), a.get("stall") or "",
+                                                  a.get("outcome"), a.get("detail")))
+    return 0
+
+
+def ask(action: str, stall=None, delay=0) -> int:
+    body = {"schema": "alfred.photon-request/1", "action": action, "by": "alfred",
+            "stall": stall, "delay": delay}
+    name = "%d-%s.json" % (time.time(), secrets.token_hex(4))
+    temporary = REQUESTS / ("." + name)
+    try:
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o640)
+        with os.fdopen(fd, "w") as stream:
+            json.dump(body, stream)
+        os.rename(temporary, REQUESTS / name)
+    except OSError as error:
+        print("Couldn't hand the request to the watchdog (%s). Hayden can run: "
+              "sudo systemctl restart alfred-photon.service" % error.strerror, file=sys.stderr)
+        return 1
+    if action == "clear":
+        print("Asked the watchdog to restart Photon%s. Hermes restarts with it, so this "
+              "conversation pauses for about a minute." % (" in %d seconds" % delay if delay else ""))
+    else:
+        print("Asked the watchdog to delete stall %s." % stall)
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("status")
+    clear = sub.add_parser("clear")
+    clear.add_argument("--delay", type=int, default=0, choices=range(0, 31), metavar="0-30")
+    delete = sub.add_parser("delete")
+    delete.add_argument("stall")
+    args = parser.parse_args()
+    if args.command == "status":
+        return status()
+    if args.command == "clear":
+        return ask("clear", delay=args.delay)
+    return ask("delete", stall=args.stall)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

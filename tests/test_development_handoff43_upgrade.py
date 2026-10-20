@@ -72,8 +72,10 @@ def test_pins_agree_with_this_release():
     before = json.loads((ROOT / "development_handoff43/installed-sha256.json").read_bytes())
     assert before == transaction.BASE == {name: None for name in transaction.DESTINATIONS}
     after = (ROOT / "development_handoff43/installed-after.sha256").read_text().splitlines()
+    # The released bytes: handoff.44 changes photon_watchdog.py in the checkout.
+    released = ROOT / "dist/alfred-fresh-v1-1.0.1-development-handoff.43"
     assert sorted(after) == sorted(
-        upgrade.digest((ROOT / source).read_bytes()) + "  " + name
+        upgrade.digest((released / source).read_bytes()) + "  " + name
         for name, source in transaction.DESTINATIONS.items())
 
 
