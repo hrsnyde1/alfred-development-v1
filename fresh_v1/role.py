@@ -89,7 +89,7 @@ def staff(spec, plan, present, allowed):
 
 def prepare_plan(job, policy, *, remote_main=None, fetch=True):
     """Existing CTO, canonical task and current remote main; no checkout/reset."""
-    from alfred.gateway.dispatcher import gateway_lock
+    from alfred.gateway.dispatcher import acquire_gateway_lock
     from alfred.gateway.journal import Journal
     from alfred.registry.loader import parse_registry, read_registry_data
 
@@ -105,7 +105,9 @@ def prepare_plan(job, policy, *, remote_main=None, fetch=True):
     ]
     if len(row) != 1:
         raise ValueError("no unique canonical filing")
-    with gateway_lock(Path(policy["gateway_state"])):
+    # handoff.40: the Gateway timer holds this lock about a second in every seven;
+    # wait for it (up to five seconds) instead of holding the task on a collision.
+    with acquire_gateway_lock(Path(policy["gateway_state"])):
         repo, spec, name, raw = cto._task_for(row[0], registry)
         project = registry.project(job["project"])
         if (
