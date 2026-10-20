@@ -211,6 +211,10 @@ run handoff38 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_plan_refu
 run handoff42 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_plan_refusal_notice.py \
   tests/test_fresh_v1.py tests/test_development_handoff42_upgrade.py --junitxml="$OUT/handoff42.xml"
 
+# handoff.43: a root timer restarts Photon only when iMessage inbound has stalled.
+run handoff43 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_photon_watchdog.py \
+  tests/test_development_handoff43_upgrade.py --junitxml="$OUT/handoff43.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"

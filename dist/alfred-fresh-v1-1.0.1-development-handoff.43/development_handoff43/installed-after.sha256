@@ -1,0 +1,3 @@
+2188ae862289b413663e30db7f137c1dbce49496dff2a638162e1c6b21943c6f  /usr/local/lib/alfred-fresh-v1/fresh_v1/photon_watchdog.py
+7b9725e56d3aa8f72e72475ced66e0f7542386b3e36b89dba17c589dc83e406d  /etc/systemd/system/alfred-photon-watchdog.service
+4bd067679091695aba55f282a5c9a7b5e046c44a5fb1dd6f6b6b09359f602a3c  /etc/systemd/system/alfred-photon-watchdog.timer
