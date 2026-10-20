@@ -1,0 +1,10 @@
+[Unit]
+Description=Alfred: refresh the Development board feed every 20 seconds
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=20s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Alfred: hand an owner's Photon stall request to the watchdog at once
+
+[Path]
+PathExistsGlob=/var/lib/alfred-photon-requests/*.json
+Unit=alfred-photon-watchdog.service
+TriggerLimitIntervalSec=60
+TriggerLimitBurst=10
+
+[Install]
+WantedBy=paths.target

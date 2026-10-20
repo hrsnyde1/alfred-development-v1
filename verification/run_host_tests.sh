@@ -215,6 +215,10 @@ run handoff42 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_plan_refu
 run handoff43 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_photon_watchdog.py \
   tests/test_development_handoff43_upgrade.py --junitxml="$OUT/handoff43.xml"
 
+# handoff.44: Photon stalls the owner can clear, and the Development board feed.
+run handoff44 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_photon_stalls.py \
+  tests/test_dev_board.py tests/test_development_handoff44_upgrade.py --junitxml="$OUT/handoff44.xml"
+
 # 4. Central CTO.
 run central-cto env PYTHONPATH="$LAB:/home/alfred/Git/alfred/.dev/bin:/home/alfred/Git/alfred/src" \
   "$PYTHON" -B -m pytest -q -p no:cacheprovider v1_cto/tests --junitxml="$OUT/central-cto.xml"

@@ -1,0 +1,23 @@
+[Unit]
+Description=Alfred: the Development board feed for Alfred OS (task workflows, read-only)
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 -I -B -c 'import sys; sys.path.insert(0, "/usr/local/lib/alfred-fresh-v1"); from fresh_v1.dev_board import main; sys.exit(main())'
+SyslogIdentifier=alfred-dev-board
+StateDirectory=alfred-dev-board
+# The development bridge (alfred) reads workflows.json (0640 root:alfred) only.
+StateDirectoryMode=0755
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+SystemCallArchitectures=native
+TimeoutStartSec=60

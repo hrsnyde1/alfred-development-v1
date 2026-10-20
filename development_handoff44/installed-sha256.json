@@ -1,0 +1,11 @@
+{
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/photon_watchdog.py": "2188ae862289b413663e30db7f137c1dbce49496dff2a638162e1c6b21943c6f",
+  "/etc/systemd/system/alfred-photon-watchdog.service": "7b9725e56d3aa8f72e72475ced66e0f7542386b3e36b89dba17c589dc83e406d",
+  "/etc/systemd/system/alfred-photon-requests.path": null,
+  "/etc/sysusers.d/alfred-photon.conf": null,
+  "/etc/tmpfiles.d/alfred-photon.conf": null,
+  "/usr/local/bin/alfred-photon-clear": null,
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/dev_board.py": null,
+  "/etc/systemd/system/alfred-dev-board.service": null,
+  "/etc/systemd/system/alfred-dev-board.timer": null
+}
