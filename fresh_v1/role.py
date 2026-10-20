@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -36,6 +37,41 @@ def git(repo, *args):
         .decode()
         .strip()
     )
+
+
+# handoff.41: criteria the pipeline cannot check from code and tests. QA and the
+# Reviewer must mark every checklist criterion passed, so demo-site T-0012 and T-0013
+# held after three rounds although the Reviewer found "no concrete code defect".
+PROCESS_CRITERION = re.compile(
+    r"build\s*(->|\u2192)\s*qa|qa\s*(->|\u2192)\s*review|\bhayden\b|\bsign-?off\b"
+    r"|\bno (merge|deploy)|\b(merge|deploy)\w*\b[^.]*\b(until|without)\b[^.]*approv", re.I)
+BROWSER_CRITERION = re.compile(
+    r"\b(desktop|mobile|responsive|viewport|cross-browser|browsers?|visually|rendered|renders"
+    r"|screen sizes?)\b|\bon (all )?devices\b|\bfunctionality\b[^.]*\b(changed|broken)\b", re.I)
+
+
+def triage_criteria(plan):
+    """Keep the code-checkable criteria on the QA and Review checklist; move the rest
+    into the plan's risks, where Hayden reads them on the plan he approves:
+    - the approval process itself, which the pipeline enforces (not code);
+    - checks that need a browser or the running site, which Hayden does on the draft PR.
+    When nothing checkable would remain, the criteria stay exactly as written."""
+    keep, pipeline, owner = [], [], []
+    for line in plan["acceptance_criteria"].splitlines():
+        criterion = line.removeprefix("- [ ] ").strip()
+        if line.startswith("- [ ] ") and PROCESS_CRITERION.search(criterion):
+            pipeline.append(criterion)
+        elif line.startswith("- [ ] ") and BROWSER_CRITERION.search(criterion):
+            owner.append(criterion)
+        else:
+            keep.append(line)
+    if not (pipeline or owner) or not any(l.startswith("- [ ] ") for l in keep):
+        return
+    plan["acceptance_criteria"] = "\n".join(keep).strip()
+    plan["risks_blockers"] = list(plan["risks_blockers"]) + [
+        "Enforced by the pipeline, not checked in code: " + c for c in pipeline] + [
+        "Hayden checks on the draft PR (needs a browser or the running site): " + c
+        for c in owner]
 
 
 def by_files(files, allowed):
@@ -193,6 +229,7 @@ def prepare_plan(job, policy, *, remote_main=None, fetch=True):
             # handoff.34: facts and owner notes from this exact snapshot of main.
             facts, notes = repo_intelligence.scan_snapshot(snapshot)
         plan = cto._central_cto(spec, repo, evidence, hashlib.sha256(raw).hexdigest())
+        triage_criteria(plan)
         plan["baseline_revision"] = remote_main
         present = [p for p in policy["allowed_scope"] if p in evidence["files"]]
         specialists, scope, listed = staff(spec, plan, present, policy["specialists"])

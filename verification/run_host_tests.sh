@@ -198,6 +198,10 @@ run handoff39 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_staffing.
 run handoff40 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_fresh_v1.py tests/test_staffing.py \
   tests/test_development_handoff40_upgrade.py --junitxml="$OUT/handoff40.xml"
 
+# handoff.41: only code-checkable criteria go on the QA and Review checklist.
+run handoff41 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_criteria_triage.py tests/test_fresh_v1.py \
+  tests/test_development_handoff41_upgrade.py --junitxml="$OUT/handoff41.xml"
+
 # handoff.38: a refused plan step texts the owner once, with a fixed reason.
 run handoff38 "$PYTHON" -B -m pytest -q -p no:cacheprovider tests/test_plan_refusal_notice.py \
   tests/test_fix_loop.py tests/test_fresh_v1.py tests/test_development_handoff38_upgrade.py \
