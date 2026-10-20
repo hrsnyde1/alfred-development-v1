@@ -1,0 +1,5 @@
+{
+  "/usr/local/lib/alfred-fresh-v1/fresh_v1/photon_watchdog.py": null,
+  "/etc/systemd/system/alfred-photon-watchdog.service": null,
+  "/etc/systemd/system/alfred-photon-watchdog.timer": null
+}
